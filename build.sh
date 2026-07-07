@@ -30,6 +30,12 @@ rm -f probe/x11_pixel_pack_test.new
 mv -f probe/x11_pixel_pack_test.new probe/x11_pixel_pack_test
 ./probe/x11_pixel_pack_test
 
+echo "== GPU runtime selftest (pure-Zag DRM ioctls; skips if no render node) =="
+rm -f probe/gpu_test.new
+"$ZNC" probe/gpu_test.zag -o probe/gpu_test.new
+mv -f probe/gpu_test.new probe/gpu_test
+./probe/gpu_test
+
 echo "== headless render smoke =="
 ./zagpa --smoke probe/smoke_app.bmp
 

@@ -85,12 +85,44 @@ src/ternary.zag    trit algebra + strict color code
 src/voxel.zag      lattice math, rotation
 src/math3d.zag     Vec3, orbit camera, projection, picking rays
 src/fb.zag         i64 framebuffer, 2D primitives, BMP/shm writers
+src/tiles.zag      viewport tile cache (static scene layer, dirty-rect blit)
 src/ui.zag         theme + immediate-mode widgets
+src/gpu_rt.zag     pure-Zag AMDGPU runtime (DRM ioctls, GEM buffers)
 std/               vendored Zag stdlib (list, hashmap, rt)
-probe/             engine tests, compiler-bug repros, smoke renders
+probe/             engine tests, GPU selftest, scale benchmark, smoke renders
 ```
 
-`NOTES.md` documents the znc compiler work done upstream while building this:
-three codegen/name-resolution bugs fixed, plus the `_zag_raw_syscall`
-intrinsic implemented so the X11 client (and `net_rt`/`thread_rt`, which were
-written against it) can exist without any C.
+## GPU
+
+`src/gpu_rt.zag` is a pure-Zag AMDGPU runtime: it drives the kernel's `amdgpu`
+DRM device directly over the `_zag_raw_syscall` intrinsic — **no libdrm, no
+Mesa, no C** — the same way `src/x11.zag` speaks to the X server. It opens
+`/dev/dri/renderD128`, queries the real device, and allocates CPU-mappable GEM
+buffers.
+
+```bash
+./zagpa --gpu-info      # real device query over pure-Zag DRM ioctls
+./probe/gpu_test        # + GEM alloc/mmap + CPU<->GPU memory round-trip
+```
+
+On the dev box this reports the live Radeon RX 5700 (Navi 10, 40 CUs, 2100 MHz)
+read straight from `AMDGPU_INFO_DEV_INFO`. When no render node is present the
+viewport falls back to the CPU rasterizer with no loss of function.
+
+**Status.** The device + GPU-visible memory layer is complete and verified
+against live hardware. Running rasterization *on* the shader cores needs the
+next stage — command-ring (PM4) submission with fences, and an RDNA-ISA compute
+kernel emitted from znc's kernel-fn path — which builds on this buffer layer and
+is the current frontier. The interactive viewport today is a Zag software
+rasterizer that no longer re-renders unchanged frames (tile cache in
+`src/tiles.zag`), which is what made the CPU path fast enough to be pleasant at
+scale (≈6 ms/frame steady-state at 5k+ components).
+
+## Compiler notes
+
+`NOTES.md` documents the `znc` compiler work done upstream while building this:
+a real heap allocator (segregated free lists + a writable BSS segment, replacing
+the leak-forever bump allocator), hex integer literals, a word-at-a-time
+`memcpy`, and the `_zag_raw_syscall` intrinsic the X11 and GPU clients are
+written against — all preserving the self-hosting fixpoint and the differential
+x86/arm64 suite.

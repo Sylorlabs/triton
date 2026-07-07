@@ -17,6 +17,7 @@
 @import("agent.zag")
 @import("mcp.zag")
 @import("session.zag")
+@import("gpu_rt.zag")
 
 fn fb_path() []u8 { return "/dev/shm/zagpa_fb.bin"; }
 
@@ -170,6 +171,33 @@ fn app_title(a: *App) []u8 {
     let base: []u8 = a.*.file_;
     if (a.*.dirty) { base = _zag_str_concat(a.*.file_, " *"); }
     return _zag_str_concat(base, " - Triton");
+}
+
+// Report the GPU the pure-Zag DRM runtime detects (real device query, no
+// libdrm/Mesa). Zero exit whether or not a render node is present.
+fn run_gpu_info() i32 {
+    let g: Gpu = gpu_open();
+    if (!g.ok) {
+        _zag_println("gpu: no amdgpu render node — the viewport uses the CPU rasterizer");
+        return 0;
+    }
+    _zag_println("gpu: amdgpu render node (queried via pure-Zag DRM ioctls)");
+    _zag_print("  PCI device id : ");
+    _zag_println(_zag_i64_to_str(g.device_id));
+    _zag_print("  family        : ");
+    _zag_println(_zag_i64_to_str(g.family));
+    _zag_print("  shader engines: ");
+    _zag_println(_zag_i64_to_str(g.shader_engines));
+    _zag_print("  compute units : ");
+    _zag_println(_zag_i64_to_str(g.cu_active));
+    _zag_print("  engine clock  : ");
+    _zag_print(_zag_i64_to_str(g.engine_clock_khz / 1000));
+    _zag_println(" MHz");
+    _zag_print("  memory clock  : ");
+    _zag_print(_zag_i64_to_str(g.memory_clock_khz / 1000));
+    _zag_println(" MHz");
+    gpu_close(&g);
+    return 0;
 }
 
 fn run_x11() i32 {
@@ -363,6 +391,9 @@ fn main() i32 {
         }
         if (_zag_strcmp(arg, "--x11-selftest") == 1) {
             return run_x11_selftest();
+        }
+        if (_zag_strcmp(arg, "--gpu-info") == 1) {
+            return run_gpu_info();
         }
         if (_zag_strcmp(arg, "--mcp") == 1) {
             return run_mcp();

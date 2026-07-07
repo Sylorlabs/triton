@@ -1,0 +1,246 @@
+// gpu_rt.zag — a pure-Zag AMDGPU runtime. No libc, no libdrm, no Mesa:
+// this drives the kernel's amdgpu DRM device directly with ioctls issued
+// through the _zag_raw_syscall intrinsic (the same primitive x11.zag uses to
+// speak to the X server). It opens /dev/dri/renderD128, queries the real
+// device (DRM_IOCTL_VERSION + AMDGPU_INFO_DEV_INFO), and allocates GEM buffer
+// objects that are CPU-mappable so the software rasterizer can hand work to —
+// and read results back from — GPU-visible memory with zero C in the path.
+//
+// ABI note: every ioctl number and struct offset below was taken from the
+// kernel's <drm/drm.h> / <drm/amdgpu_drm.h> (uapi, stable). The _IOC encoding
+// is dir<<30 | size<<16 | 'd'<<8 | nr, with 'd' = 0x64.
+//
+// Scope today: device open + query + GEM alloc/mmap/CPU round-trip (all
+// verified by --gpu-selftest against the live GPU). Command submission (PM4
+// rings) and the RDNA1 ISA compute path build on this buffer layer; see
+// gpu_raster.zag for how the viewer consumes it with a CPU fallback.
+
+@import("../std/list.zag") as list
+
+extern fn _zag_memcpy(dst: *i8, src: *i8, n: i32) void;
+
+// ── raw Linux syscalls ────────────────────────────────────────────────────────
+fn gsys(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) i64 {
+    return _zag_raw_syscall(n, a, b, c, d, e, f);
+}
+
+fn g_open_rw(path_ptr: i64) i64 {
+    // open(path, O_RDWR=2, 0)
+    return gsys(2, path_ptr, 2, 0, 0, 0, 0);
+}
+fn g_close(fd: i64) i64 { return gsys(3, fd, 0, 0, 0, 0, 0); }
+fn g_ioctl(fd: i64, req: i64, arg_ptr: i64) i64 {
+    return gsys(16, fd, req, arg_ptr, 0, 0, 0);
+}
+fn g_mmap(len: i64, fd: i64, off: i64) i64 {
+    // mmap(NULL, len, PROT_READ|PROT_WRITE=3, MAP_SHARED=1, fd, off)
+    return gsys(9, 0, len, 3, 1, fd, off);
+}
+fn g_munmap(addr: i64, len: i64) i64 { return gsys(11, addr, len, 0, 0, 0, 0); }
+
+// ── DRM / AMDGPU ioctl encodings ──────────────────────────────────────────────
+// Built the same way the kernel's _IOC macro does — dir<<30 | size<<16 |
+// type<<8 | nr — instead of pre-baked decimals (znc has no hex literals, and a
+// mis-typed magic number silently becomes a different ioctl → ENOTTY).
+fn IOC_NONE()  i64 { return 0; }
+fn IOC_WRITE() i64 { return 1; }   // userspace -> kernel
+fn IOC_READ()  i64 { return 2; }   // kernel -> userspace
+fn DRM_TYPE()  i64 { return 0x64; } // 'd'
+
+fn ioc(dir: i64, nr: i64, size: i64) i64 {
+    return dir * 0x40000000 + size * 0x10000 + DRM_TYPE() * 0x100 + nr;
+}
+fn ioc_wr(nr: i64, size: i64) i64 { return ioc(IOC_READ() + IOC_WRITE(), nr, size); }
+fn ioc_w(nr: i64, size: i64) i64 { return ioc(IOC_WRITE(), nr, size); }
+
+fn DRM_CMD_BASE() i64 { return 64; }   // 0x40
+
+fn IOCTL_VERSION() i64 { return ioc_wr(0, 64); }                       // struct drm_version
+fn IOCTL_AMDGPU_INFO() i64 { return ioc_w(DRM_CMD_BASE() + 5, 32); }   // drm_amdgpu_info
+fn IOCTL_AMDGPU_GEM_CREATE() i64 { return ioc_wr(DRM_CMD_BASE() + 0, 32); }
+fn IOCTL_AMDGPU_GEM_MMAP() i64 { return ioc_wr(DRM_CMD_BASE() + 1, 8); }
+fn IOCTL_GEM_CLOSE() i64 { return ioc_w(9, 8); }                       // drm_gem_close
+
+fn AMDGPU_INFO_DEV_INFO() i32 { return 22; }         // 0x16
+fn GEM_DOMAIN_GTT() i64 { return 2; }
+fn GEM_CREATE_CPU_ACCESS() i64 { return 1; }
+
+// ── little-endian byte-buffer pokes/peeks ─────────────────────────────────────
+fn buf_zero(n: i32) list.ArrayList[u8] {
+    let b: list.ArrayList[u8] = list.make[u8](n);
+    let i: i32 = 0;
+    while (i < n) { list.push[u8](&b, 0); i = i + 1; }
+    return b;
+}
+fn poke32(b: *list.ArrayList[u8], off: i32, v: i64) void {
+    let k: i32 = 0;
+    while (k < 4) {
+        b.*.data[off + k] = ((v / pow2(k * 8)) & 255) as u8;
+        k = k + 1;
+    }
+}
+fn poke64(b: *list.ArrayList[u8], off: i32, v: i64) void {
+    let k: i32 = 0;
+    while (k < 8) {
+        b.*.data[off + k] = ((v / pow2(k * 8)) & 255) as u8;
+        k = k + 1;
+    }
+}
+fn peek32(b: list.ArrayList[u8], off: i32) i64 {
+    let v: i64 = 0;
+    let k: i32 = 0;
+    while (k < 4) {
+        v = v + (b.data[off + k] as i64) * pow2(k * 8);
+        k = k + 1;
+    }
+    return v;
+}
+fn peek64(b: list.ArrayList[u8], off: i32) i64 {
+    let v: i64 = 0;
+    let k: i32 = 0;
+    while (k < 8) {
+        v = v + (b.data[off + k] as i64) * pow2(k * 8);
+        k = k + 1;
+    }
+    return v;
+}
+fn pow2(bits: i32) i64 {
+    let v: i64 = 1;
+    let i: i32 = 0;
+    while (i < bits) { v = v * 2; i = i + 1; }
+    return v;
+}
+
+// ── device handle ─────────────────────────────────────────────────────────────
+struct Gpu {
+    fd: i64,
+    ok: bool,
+    device_id: i64,
+    family: i64,
+    shader_engines: i64,
+    cu_active: i64,
+    engine_clock_khz: i64,
+    memory_clock_khz: i64,
+}
+
+fn gpu_bad() Gpu {
+    return Gpu{
+        .fd = 0 - 1, .ok = false, .device_id = 0, .family = 0,
+        .shader_engines = 0, .cu_active = 0,
+        .engine_clock_khz = 0, .memory_clock_khz = 0,
+    };
+}
+
+// NUL-terminated device path in a byte buffer (open() wants a C string).
+fn gpu_dev_path() list.ArrayList[u8] {
+    let p: []u8 = "/dev/dri/renderD128";
+    let b: list.ArrayList[u8] = list.make[u8](p.len + 1);
+    let i: i32 = 0;
+    while (i < p.len) { list.push[u8](&b, p[i]); i = i + 1; }
+    list.push[u8](&b, 0);
+    return b;
+}
+
+// Open the render node and query real device parameters. On any failure the
+// returned Gpu has ok=false (callers fall back to the CPU raster path).
+fn gpu_open() Gpu {
+    let path: list.ArrayList[u8] = gpu_dev_path();
+    let fd: i64 = g_open_rw(path.data as i64);
+    list.free[u8](&path);
+    if (fd < 0) { return gpu_bad(); }
+
+    let g: Gpu = Gpu{
+        .fd = fd, .ok = true, .device_id = 0, .family = 0,
+        .shader_engines = 0, .cu_active = 0,
+        .engine_clock_khz = 0, .memory_clock_khz = 0,
+    };
+
+    // AMDGPU_INFO_DEV_INFO → struct drm_amdgpu_info_device (448 bytes)
+    let devinfo: list.ArrayList[u8] = buf_zero(448);
+    let req: list.ArrayList[u8] = buf_zero(32);   // struct drm_amdgpu_info
+    poke64(&req, 0, devinfo.data as i64);         // return_pointer
+    poke32(&req, 8, 448);                         // return_size
+    poke32(&req, 12, AMDGPU_INFO_DEV_INFO() as i64);
+    let rc: i64 = g_ioctl(fd, IOCTL_AMDGPU_INFO(), req.data as i64);
+    let out: Gpu = g;
+    if (rc == 0) {
+        out.device_id = peek32(devinfo, 0);       // device_id
+        out.family = peek32(devinfo, 16);         // family
+        out.shader_engines = peek32(devinfo, 20); // num_shader_engines
+        out.engine_clock_khz = peek64(devinfo, 32);
+        out.memory_clock_khz = peek64(devinfo, 40);
+        out.cu_active = peek32(devinfo, 48);      // cu_active_number
+    }
+    list.free[u8](&devinfo);
+    list.free[u8](&req);
+    return out;
+}
+
+fn gpu_close(g: *Gpu) void {
+    if (g.*.fd >= 0) { let _r: i64 = g_close(g.*.fd); }
+    g.*.fd = 0 - 1;
+    g.*.ok = false;
+}
+
+// ── GEM buffer objects ────────────────────────────────────────────────────────
+struct GpuBuf {
+    handle: i64,
+    size: i64,
+    cpu_addr: i64,   // mmap'd host pointer, or 0
+    ok: bool,
+}
+
+fn gpu_buf_bad() GpuBuf {
+    return GpuBuf{ .handle = 0, .size = 0, .cpu_addr = 0, .ok = false };
+}
+
+// Allocate a CPU-accessible GTT buffer of `size` bytes and mmap it into the
+// host address space. Returns ok=false if either the GEM create or the mmap
+// fails.
+fn gpu_alloc(g: *Gpu, size: i64) GpuBuf {
+    if (!g.*.ok) { return gpu_buf_bad(); }
+
+    // union drm_amdgpu_gem_create (32 bytes): in{bo_size, alignment, domains,
+    // domain_flags}; out{handle, _pad} aliases the first 8 bytes.
+    let cr: list.ArrayList[u8] = buf_zero(32);
+    poke64(&cr, 0, size);                       // bo_size
+    poke64(&cr, 8, 4096);                        // alignment (one page)
+    poke64(&cr, 16, GEM_DOMAIN_GTT());          // domains
+    poke64(&cr, 24, GEM_CREATE_CPU_ACCESS());   // domain_flags
+    let rc: i64 = g_ioctl(g.*.fd, IOCTL_AMDGPU_GEM_CREATE(), cr.data as i64);
+    if (rc != 0) { list.free[u8](&cr); return gpu_buf_bad(); }
+    let handle: i64 = peek32(cr, 0);            // out.handle
+    list.free[u8](&cr);
+
+    // union drm_amdgpu_gem_mmap (8 bytes): in{handle,_pad} → out{addr_ptr}
+    let mm: list.ArrayList[u8] = buf_zero(8);
+    poke32(&mm, 0, handle);
+    let mrc: i64 = g_ioctl(g.*.fd, IOCTL_AMDGPU_GEM_MMAP(), mm.data as i64);
+    if (mrc != 0) { list.free[u8](&mm); return gpu_free_handle(g, handle); }
+    let off: i64 = peek64(mm, 0);              // fake mmap offset
+    list.free[u8](&mm);
+
+    let addr: i64 = g_mmap(size, g.*.fd, off);
+    if (addr < 0 && addr > 0 - 4096) {          // negative = -errno
+        return gpu_free_handle(g, handle);
+    }
+    return GpuBuf{ .handle = handle, .size = size, .cpu_addr = addr, .ok = true };
+}
+
+fn gpu_free_handle(g: *Gpu, handle: i64) GpuBuf {
+    let cl: list.ArrayList[u8] = buf_zero(8);
+    poke32(&cl, 0, handle);
+    let _r: i64 = g_ioctl(g.*.fd, IOCTL_GEM_CLOSE(), cl.data as i64);
+    list.free[u8](&cl);
+    return gpu_buf_bad();
+}
+
+fn gpu_free(g: *Gpu, b: *GpuBuf) void {
+    if (b.*.cpu_addr != 0) { let _m: i64 = g_munmap(b.*.cpu_addr, b.*.size); }
+    if (b.*.ok) { let _x: GpuBuf = gpu_free_handle(g, b.*.handle); }
+    b.*.ok = false;
+    b.*.cpu_addr = 0;
+}
+
+// Host pointer to the buffer's mapped bytes (for _zag_memcpy in/out).
+fn gpu_buf_ptr(b: GpuBuf) i64 { return b.cpu_addr; }

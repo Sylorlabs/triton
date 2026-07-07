@@ -1,0 +1,74 @@
+// gpu_test.zag — pure-Zag AMDGPU runtime selftest against the live GPU.
+// Opens the render node, prints real device parameters, allocates a
+// CPU-mappable GEM buffer, round-trips a pattern through GPU-visible memory.
+// Skips cleanly (exit 0) when no /dev/dri render node is present.
+
+@import("../std/list.zag") as list
+@import("../src/gpu_rt.zag")
+
+extern fn _zag_memcpy(dst: *i8, src: *i8, n: i32) void;
+
+fn pr(k: []u8, v: i64) void {
+    _zag_print("  ");
+    _zag_print(k);
+    _zag_print(" = ");
+    _zag_println(_zag_i64_to_str(v));
+}
+
+fn main() i32 {
+    let g: Gpu = gpu_open();
+    if (!g.ok) {
+        _zag_println("gpu: no amdgpu render node (skipping) — CPU raster path used");
+        return 0;
+    }
+    _zag_println("GPU SELFTEST (pure Zag, direct DRM ioctls)");
+    pr("device_id (dec)", g.device_id);
+    pr("family", g.family);
+    pr("shader_engines", g.shader_engines);
+    pr("compute_units", g.cu_active);
+    pr("engine_clock_khz", g.engine_clock_khz);
+    pr("memory_clock_khz", g.memory_clock_khz);
+
+    let fails: i32 = 0;
+    if (g.device_id == 0) { _zag_println("  XX  device_id zero (query failed)"); fails = fails + 1; }
+    else { _zag_println("  ok  device queried over pure-Zag ioctl"); }
+
+    // allocate a 1 MiB CPU-visible GTT buffer and round-trip a pattern
+    let n: i64 = 1048576;
+    let buf: GpuBuf = gpu_alloc(&g, n);
+    if (!buf.ok) {
+        _zag_println("  XX  gem alloc/mmap failed");
+        gpu_close(&g);
+        return 1;
+    }
+    _zag_println("  ok  GEM buffer allocated + mmap'd (GTT, CPU-visible)");
+
+    // write a pattern host-side into GPU memory, read it back
+    let src: list.ArrayList[u8] = list.make[u8](256);
+    let i: i32 = 0;
+    while (i < 256) { list.push[u8](&src, (i * 7 + 3) as u8); i = i + 1; }
+    _zag_memcpy(buf.cpu_addr as *i8, src.data as *i8, 256);
+
+    let back: list.ArrayList[u8] = list.make[u8](256);
+    let j: i32 = 0;
+    while (j < 256) { list.push[u8](&back, 0); j = j + 1; }
+    _zag_memcpy(back.data as *i8, buf.cpu_addr as *i8, 256);
+
+    let match: bool = true;
+    let k: i32 = 0;
+    while (k < 256) {
+        if (back.data[k] != ((k * 7 + 3) as u8)) { match = false; }
+        k = k + 1;
+    }
+    if (match) { _zag_println("  ok  CPU<->GPU memory round-trip verified"); }
+    else { _zag_println("  XX  GPU memory round-trip mismatch"); fails = fails + 1; }
+
+    list.free[u8](&src);
+    list.free[u8](&back);
+    gpu_free(&g, &buf);
+    gpu_close(&g);
+
+    if (fails == 0) { _zag_println("GPU SELFTEST: ALL PASS"); return 0; }
+    _zag_println("GPU SELFTEST: FAILURES");
+    return 1;
+}
