@@ -44,11 +44,22 @@ literal paths (kept in lockstep so the differential suite stays green).
 
 ## Where the GPU runtime lives
 
-`src/gpu_rt.zag` drives the kernel's `amdgpu` DRM device directly through the
-`_zag_raw_syscall` intrinsic — no libdrm, no Mesa, no C. It opens
-`/dev/dri/renderD128`, queries the real device (`DRM_IOCTL_VERSION` +
-`AMDGPU_INFO_DEV_INFO`), and allocates CPU-mappable GEM buffer objects.
-`./zagpa --gpu-info` and `probe/gpu_test` exercise it against live hardware.
+`src/gpu_rt.zag` and `src/rdna.zag` are the whole GPU stack — no libdrm, no
+Mesa, no LLVM, no C — driving the kernel's `amdgpu` DRM device through the
+`_zag_raw_syscall` intrinsic:
 
-Command submission (PM4 rings, fences) and an RDNA-ISA compute path build on
-this buffer layer; that is the remaining frontier (see README).
+- **device**: open `/dev/dri/renderD128`, `DRM_IOCTL_VERSION` +
+  `AMDGPU_INFO_DEV_INFO` query, GEM buffer alloc + mmap.
+- **submission**: GPU context (`AMDGPU_CTX`), GPU virtual-address mapping
+  (`AMDGPU_GEM_VA`), command-buffer submission (`AMDGPU_CS`) with PM4 packets,
+  fence wait (`AMDGPU_WAIT_CS`, bounded timeout so a bad submit can't wedge).
+- **ISA**: `src/rdna.zag` is a hand-written RDNA1 (GFX10.1) machine-code emitter
+  — each instruction assembled from its microcode field layout (VOP1,
+  FLAT/GLOBAL, SOPP). `probe/gpu_compute_test` emits a kernel with it, dispatches
+  it via `SET_SH_REG` + `DISPATCH_DIRECT`, and verifies what the shader cores
+  wrote. This is a complete Zag-to-silicon compute path.
+
+The ioctl encodings were built from the `_IOC(dir,type,nr,size)` components
+(not pre-baked decimals) and the register offsets / struct layouts taken from
+the stable uapi headers — the same "read the spec, encode it ourselves"
+approach used everywhere else in the runtime.

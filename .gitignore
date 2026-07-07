@@ -9,6 +9,8 @@ probe/hm_dbg
 probe/move_dbg
 probe/x11_pixel_pack_test
 probe/gpu_test
+probe/gpu_submit_test
+probe/gpu_compute_test
 probe/scale_test
 probe/*.bmp
 !probe/smoke_app.bmp

@@ -1,0 +1,80 @@
+// gpu_submit_test.zag — Stage A: real GPU command submission.
+// Builds a PM4 command buffer that makes the GPU command processor WRITE_DATA a
+// magic value into a buffer, submits it on the compute ring, waits the fence,
+// and verifies the value the *GPU* wrote. No shader yet — this proves context
+// creation, VM mapping, IB submission, and fencing all work end to end.
+// Skips cleanly (exit 0) when no render node is present.
+
+@import("../std/list.zag") as list
+@import("../src/gpu_rt.zag")
+
+extern fn _zag_memcpy(dst: *i8, src: *i8, n: i32) void;
+
+fn read_u32(cpu_addr: i64, off: i32) i64 {
+    let b: list.ArrayList[u8] = list.make[u8](4);
+    let i: i32 = 0;
+    while (i < 4) { list.push[u8](&b, 0); i = i + 1; }
+    _zag_memcpy(b.data as *i8, (cpu_addr + (off as i64)) as *i8, 4);
+    let v: i64 = 0;
+    let k: i32 = 0;
+    while (k < 4) { v = v + (b.data[k] as i64) * pow2(k * 8); k = k + 1; }
+    list.free[u8](&b);
+    return v;
+}
+
+fn main() i32 {
+    let g: Gpu = gpu_open();
+    if (!g.ok) {
+        _zag_println("gpu: no amdgpu render node (skipping)");
+        return 0;
+    }
+    _zag_println("GPU SUBMIT TEST (pure Zag: ctx + VM map + PM4 IB + fence)");
+    let fails: i32 = 0;
+
+    let ctx: i64 = gpu_ctx_create(&g);
+    if (ctx == 0) { _zag_println("  XX  context create failed"); gpu_close(&g); return 1; }
+    _zag_println("  ok  GPU context created");
+
+    // data buffer the GPU will write into, mapped read/write
+    let data: GpuBuf = gpu_alloc(&g, 4096);
+    if (!data.ok || !gpu_map_data(&g, &data)) { _zag_println("  XX  data buffer map failed"); gpu_ctx_free(&g, ctx); gpu_close(&g); return 1; }
+    // command buffer, mapped read/execute
+    let ib: GpuBuf = gpu_alloc(&g, 4096);
+    if (!ib.ok || !gpu_map_exec(&g, &ib)) { _zag_println("  XX  IB map failed"); gpu_ctx_free(&g, ctx); gpu_close(&g); return 1; }
+    _zag_println("  ok  data + command buffers VM-mapped");
+
+    // pre-poison the target so we know the GPU actually wrote it
+    let poison: list.ArrayList[u8] = list.make[u8](4);
+    let pi: i32 = 0;
+    while (pi < 4) { list.push[u8](&poison, 0); pi = pi + 1; }
+    _zag_memcpy(data.cpu_addr as *i8, poison.data as *i8, 4);
+    list.free[u8](&poison);
+
+    // build: WRITE_DATA magic -> data buffer VA
+    let magic: i64 = 0x5A61C0DE;   // "Za"gCODE
+    let pm4: list.ArrayList[u8] = list.make[u8](64);
+    pm4_write_data1(&pm4, data.gpu_va, magic);
+    let ok: bool = gpu_run_pm4(&g, ctx, &ib, pm4, HW_IP_COMPUTE());
+    list.free[u8](&pm4);
+
+    if (!ok) { _zag_println("  XX  submit/fence failed"); fails = fails + 1; }
+    else { _zag_println("  ok  IB submitted and fence signalled"); }
+
+    let got: i64 = read_u32(data.cpu_addr, 0);
+    if (got == magic) {
+        _zag_println("  ok  GPU command processor wrote the magic value");
+    } else {
+        _zag_print("  XX  wrong value: got ");
+        _zag_println(_zag_i64_to_str(got));
+        fails = fails + 1;
+    }
+
+    gpu_free(&g, &ib);
+    gpu_free(&g, &data);
+    gpu_ctx_free(&g, ctx);
+    gpu_close(&g);
+
+    if (fails == 0) { _zag_println("GPU SUBMIT TEST: ALL PASS"); return 0; }
+    _zag_println("GPU SUBMIT TEST: FAILURES");
+    return 1;
+}

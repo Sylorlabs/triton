@@ -1,0 +1,101 @@
+// gpu_compute_test.zag — Stage B: a real RDNA1 compute shader on the shader
+// cores. We hand-emit a GFX10 kernel (pure Zag, src/rdna.zag), upload it to an
+// executable GPU buffer, build the PM4 to configure the compute pipeline and
+// DISPATCH_DIRECT it, fence, and verify the values the *shader* wrote.
+// Skips cleanly (exit 0) when no render node is present.
+
+@import("../std/list.zag") as list
+@import("../src/gpu_rt.zag")
+@import("../src/rdna.zag")
+
+extern fn _zag_memcpy(dst: *i8, src: *i8, n: i32) void;
+
+fn read_u32(cpu_addr: i64, off: i32) i64 {
+    let b: list.ArrayList[u8] = list.make[u8](4);
+    let i: i32 = 0;
+    while (i < 4) { list.push[u8](&b, 0); i = i + 1; }
+    _zag_memcpy(b.data as *i8, (cpu_addr + (off as i64)) as *i8, 4);
+    let v: i64 = 0;
+    let k: i32 = 0;
+    while (k < 4) { v = v + (b.data[k] as i64) * pow2(k * 8); k = k + 1; }
+    list.free[u8](&b);
+    return v;
+}
+
+fn zero4(cpu_addr: i64) void {
+    let z: list.ArrayList[u8] = list.make[u8](8);
+    let i: i32 = 0;
+    while (i < 8) { list.push[u8](&z, 0); i = i + 1; }
+    _zag_memcpy(cpu_addr as *i8, z.data as *i8, 8);
+    list.free[u8](&z);
+}
+
+fn main() i32 {
+    let g: Gpu = gpu_open();
+    if (!g.ok) {
+        _zag_println("gpu: no amdgpu render node (skipping)");
+        return 0;
+    }
+    _zag_println("GPU COMPUTE TEST (pure-Zag RDNA1 shader on the cores)");
+    let fails: i32 = 0;
+
+    let ctx: i64 = gpu_ctx_create(&g);
+    if (ctx == 0) { _zag_println("  XX  context create failed"); gpu_close(&g); return 1; }
+
+    // output buffer (read/write) + shader buffer (read/exec) + IB (read/exec)
+    let data: GpuBuf = gpu_alloc(&g, 4096);
+    let shader: GpuBuf = gpu_alloc(&g, 4096);
+    let ib: GpuBuf = gpu_alloc(&g, 4096);
+    if (!data.ok || !shader.ok || !ib.ok
+        || !gpu_map_data(&g, &data) || !gpu_map_exec(&g, &shader) || !gpu_map_exec(&g, &ib)) {
+        _zag_println("  XX  buffer alloc/map failed");
+        gpu_ctx_free(&g, ctx); gpu_close(&g); return 1;
+    }
+    _zag_println("  ok  output + shader + command buffers VM-mapped");
+
+    // emit the kernel: store 0xCAFEF00D and 0x42 to the output buffer
+    let magic: i64 = 0xCAFEF00D;
+    let tag: i64 = 0x42;
+    let code: list.ArrayList[u8] = list.make[u8](64);
+    let dwords: i32 = rdna_emit_store_kernel(&code, magic, tag);
+    _zag_print("  ..  kernel emitted (");
+    _zag_print(_zag_i64_to_str(dwords as i64));
+    _zag_println(" dwords of RDNA1 machine code)");
+    _zag_memcpy(shader.cpu_addr as *i8, code.data as *i8, code.len);
+    list.free[u8](&code);
+
+    // poison the output so only the shader can produce the expected values
+    zero4(data.cpu_addr);
+    let _p: i64 = read_u32(data.cpu_addr, 0);
+
+    // build + submit the dispatch (1 thread, 1 workgroup)
+    let pm4: list.ArrayList[u8] = list.make[u8](128);
+    pm4_build_dispatch(&pm4, shader.gpu_va, data.gpu_va, 1, 1, 1, 1, 1, 1);
+    let ok: bool = gpu_run_pm4(&g, ctx, &ib, pm4, HW_IP_COMPUTE());
+    list.free[u8](&pm4);
+
+    if (!ok) { _zag_println("  XX  dispatch submit/fence failed (or timed out)"); fails = fails + 1; }
+    else { _zag_println("  ok  dispatch submitted and fence signalled"); }
+
+    let w0: i64 = read_u32(data.cpu_addr, 0);
+    let w1: i64 = read_u32(data.cpu_addr, 4);
+    if (w0 == magic && w1 == tag) {
+        _zag_println("  ok  shader cores wrote both outputs — GPU compute verified");
+    } else {
+        _zag_print("  XX  wrong output: [0]=");
+        _zag_print(_zag_i64_to_str(w0));
+        _zag_print(" [4]=");
+        _zag_println(_zag_i64_to_str(w1));
+        fails = fails + 1;
+    }
+
+    gpu_free(&g, &ib);
+    gpu_free(&g, &shader);
+    gpu_free(&g, &data);
+    gpu_ctx_free(&g, ctx);
+    gpu_close(&g);
+
+    if (fails == 0) { _zag_println("GPU COMPUTE TEST: ALL PASS"); return 0; }
+    _zag_println("GPU COMPUTE TEST: FAILURES");
+    return 1;
+}

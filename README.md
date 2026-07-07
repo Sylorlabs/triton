@@ -87,7 +87,8 @@ src/math3d.zag     Vec3, orbit camera, projection, picking rays
 src/fb.zag         i64 framebuffer, 2D primitives, BMP/shm writers
 src/tiles.zag      viewport tile cache (static scene layer, dirty-rect blit)
 src/ui.zag         theme + immediate-mode widgets
-src/gpu_rt.zag     pure-Zag AMDGPU runtime (DRM ioctls, GEM buffers)
+src/gpu_rt.zag     pure-Zag AMDGPU runtime (DRM ioctls, GEM, context, CS, fence)
+src/rdna.zag       hand-written RDNA1 (GFX10) machine-code emitter
 std/               vendored Zag stdlib (list, hashmap, rt)
 probe/             engine tests, GPU selftest, scale benchmark, smoke renders
 ```
@@ -101,22 +102,37 @@ Mesa, no C** — the same way `src/x11.zag` speaks to the X server. It opens
 buffers.
 
 ```bash
-./zagpa --gpu-info      # real device query over pure-Zag DRM ioctls
-./probe/gpu_test        # + GEM alloc/mmap + CPU<->GPU memory round-trip
+./zagpa --gpu-info          # real device query over pure-Zag DRM ioctls
+./probe/gpu_test            # + GEM alloc/mmap + CPU<->GPU memory round-trip
+./probe/gpu_submit_test     # + context, VM mapping, PM4 command buffer, fence
+./probe/gpu_compute_test    # + an RDNA1 compute shader run on the shader cores
 ```
 
 On the dev box this reports the live Radeon RX 5700 (Navi 10, 40 CUs, 2100 MHz)
-read straight from `AMDGPU_INFO_DEV_INFO`. When no render node is present the
-viewport falls back to the CPU rasterizer with no loss of function.
+read straight from `AMDGPU_INFO_DEV_INFO`. When no render node is present every
+GPU selftest skips cleanly and the viewport uses the CPU rasterizer with no loss
+of function.
 
-**Status.** The device + GPU-visible memory layer is complete and verified
-against live hardware. Running rasterization *on* the shader cores needs the
-next stage — command-ring (PM4) submission with fences, and an RDNA-ISA compute
-kernel emitted from znc's kernel-fn path — which builds on this buffer layer and
-is the current frontier. The interactive viewport today is a Zag software
-rasterizer that no longer re-renders unchanged frames (tile cache in
-`src/tiles.zag`), which is what made the CPU path fast enough to be pleasant at
-scale (≈6 ms/frame steady-state at 5k+ components).
+**The whole GPU stack is pure Zag — no libdrm, no Mesa, no LLVM, no C:**
+
+- `src/gpu_rt.zag` — device open/query, GEM buffer alloc + mmap, GPU virtual
+  address mapping, GPU context, command submission (`AMDGPU_CS`), and fencing,
+  all over `_zag_raw_syscall`.
+- `src/rdna.zag` — a hand-written RDNA1 (GFX10.1) machine-code emitter. Each
+  instruction is built from its documented microcode field layout (VOP1,
+  FLAT/GLOBAL, SOPP); no assembler in the loop.
+
+`probe/gpu_compute_test` hand-emits a GFX10 kernel with `src/rdna.zag`, uploads
+it to an executable GPU buffer, builds the PM4 to configure the compute pipeline
+(`SET_SH_REG` for the `COMPUTE_*` registers) and `DISPATCH_DIRECT`s it, then
+verifies the values the **shader cores** wrote back — a full znc-to-silicon
+compute path with nothing but Zag in it.
+
+The interactive viewport is still the Zag software rasterizer (it no longer
+re-renders unchanged frames — tile cache in `src/tiles.zag` — which is what makes
+it ≈6 ms/frame steady-state at 5k+ components). Moving per-pixel rasterization
+onto the cores is the next increment: it needs a multi-lane addressing kernel
+(per-thread global-id arithmetic) on top of the verified single-thread path.
 
 ## Compiler notes
 

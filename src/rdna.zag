@@ -1,0 +1,89 @@
+// rdna.zag — a hand-written RDNA1 (GFX10.1) machine-code emitter, in pure Zag.
+// No assembler, no LLVM: each function builds one instruction word from its
+// documented microcode field layout, so triton can hand znc-style compute
+// kernels straight to the shader cores. Instructions are appended as
+// little-endian dwords to an ArrayList[u8] (the same host buffer that then gets
+// memcpy'd into a VM-mapped, executable GPU buffer).
+//
+// Field layouts below are from the "RDNA 1.0 Instruction Set Architecture"
+// reference (the microcode formats VOP1, FLAT/GLOBAL, SOPP).
+
+@import("../std/list.zag") as list
+
+fn r_pow2(bits: i32) i64 {
+    let v: i64 = 1;
+    let i: i32 = 0;
+    while (i < bits) { v = v * 2; i = i + 1; }
+    return v;
+}
+
+fn r_dw(s: *list.ArrayList[u8], v: i64) void {
+    let k: i32 = 0;
+    while (k < 4) {
+        list.push[u8](s, ((v / r_pow2(k * 8)) & 255) as u8);
+        k = k + 1;
+    }
+}
+
+// ── VOP1 (single-source vector ALU, 32-bit) ──────────────────────────────────
+//   [31:25] = 0b0111111 (0x3F)   fixed VOP1 encoding
+//   [24:17] = VDST               destination VGPR (0..255)
+//   [16:9]  = OP                 opcode (v_mov_b32 = 1)
+//   [8:0]   = SRC0               source operand (0..255 = SGPR, 256+ = VGPR,
+//                                255 = 32-bit literal constant in the next dw)
+fn vop1(vdst: i64, op: i64, src0: i64) i64 {
+    return 0x3F * r_pow2(25) + vdst * r_pow2(17) + op * r_pow2(9) + src0;
+}
+
+// v_mov_b32 vDST, sSRC  (SGPR source; SGPR index == scalar operand code)
+fn v_mov_b32_from_sgpr(s: *list.ArrayList[u8], vdst: i64, sgpr: i64) void {
+    r_dw(s, vop1(vdst, 1, sgpr));
+}
+
+// v_mov_b32 vDST, <literal>  (SRC0 = 255 selects the trailing 32-bit literal)
+fn v_mov_b32_lit(s: *list.ArrayList[u8], vdst: i64, lit: i64) void {
+    r_dw(s, vop1(vdst, 1, 255));
+    r_dw(s, lit & 0xFFFFFFFF);
+}
+
+// ── FLAT/GLOBAL (memory), GFX10 ──────────────────────────────────────────────
+// global_store_dword v[ADDR:ADDR+1], vDATA, off [offset:N]
+//   word0: [31:26]=0b110111 encoding, GLOBAL segment, STORE_DWORD opcode, and
+//          the mandatory GFX10 control bits are captured in the opcode base
+//          0xDC708000; the 13-bit immediate OFFSET occupies [12:0].
+//   word1: [7:0]=ADDR vgpr, [15:8]=DATA vgpr, [22:16]=SADDR (0x7D = NULL/"off",
+//          i.e. the address is a full 64-bit VGPR pair, no scalar base).
+fn global_store_dword(s: *list.ArrayList[u8], addr_vgpr: i64, data_vgpr: i64, offset: i64) void {
+    r_dw(s, 0xDC708000 + (offset & 0x1FFF));
+    r_dw(s, 0x7D * r_pow2(16) + data_vgpr * r_pow2(8) + addr_vgpr);
+}
+
+// ── SOPP (scalar control) ────────────────────────────────────────────────────
+// s_waitcnt <simm16>: [31:23]=0b101111111, [22:16]=OP(s_waitcnt=12), [15:0]=SIMM
+// vmcnt(0) with expcnt/lgkmcnt left maximal encodes to SIMM 0x3F70.
+fn s_waitcnt_vm0(s: *list.ArrayList[u8]) void {
+    r_dw(s, 0xBF8C0000 + 0x3F70);
+}
+
+// s_endpgm: SOPP op 48 (0x30) → 0xBF810000
+fn s_endpgm(s: *list.ArrayList[u8]) void {
+    r_dw(s, 0xBF810000);
+}
+
+// ── a complete kernel ─────────────────────────────────────────────────────────
+// Emit a minimal compute kernel: the 64-bit output buffer base arrives in the
+// user SGPRs s[0:1]; the kernel stores `v0word` at [base+0] and `v1word` at
+// [base+4], drains the vector-memory queue, and ends. Written to `s`, returns
+// the kernel's dword count.
+fn rdna_emit_store_kernel(s: *list.ArrayList[u8], word0: i64, word1: i64) i32 {
+    let start: i32 = s.*.len;
+    v_mov_b32_from_sgpr(s, 0, 0);        // v0 = s0 (addr lo)
+    v_mov_b32_from_sgpr(s, 1, 1);        // v1 = s1 (addr hi)
+    v_mov_b32_lit(s, 2, word0);          // v2 = word0
+    global_store_dword(s, 0, 2, 0);      // [v[0:1] + 0] = v2
+    v_mov_b32_lit(s, 3, word1);          // v3 = word1
+    global_store_dword(s, 0, 3, 4);      // [v[0:1] + 4] = v3
+    s_waitcnt_vm0(s);                    // wait for the stores to be sent
+    s_endpgm(s);
+    return (s.*.len - start) / 4;
+}

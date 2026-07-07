@@ -36,6 +36,18 @@ rm -f probe/gpu_test.new
 mv -f probe/gpu_test.new probe/gpu_test
 ./probe/gpu_test
 
+echo "== GPU command submission (ctx + VM map + PM4 IB + fence) =="
+rm -f probe/gpu_submit_test.new
+"$ZNC" probe/gpu_submit_test.zag -o probe/gpu_submit_test.new
+mv -f probe/gpu_submit_test.new probe/gpu_submit_test
+./probe/gpu_submit_test
+
+echo "== GPU compute: pure-Zag RDNA1 shader on the shader cores =="
+rm -f probe/gpu_compute_test.new
+"$ZNC" probe/gpu_compute_test.zag -o probe/gpu_compute_test.new
+mv -f probe/gpu_compute_test.new probe/gpu_compute_test
+./probe/gpu_compute_test
+
 echo "== headless render smoke =="
 ./zagpa --smoke probe/smoke_app.bmp
 
