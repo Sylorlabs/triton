@@ -149,24 +149,12 @@ fn world_remove_vox(w: *World, v: Vox, comp_id: i32) void {
     }
 }
 
-fn query_has_id(out: *list.ArrayList[i32], id: i32) bool {
-    let i: i32 = 0;
-    while (i < out.*.len) {
-        if (out.*.data[i] == id) { return true; }
-        i = i + 1;
-    }
-    return false;
-}
-
-fn query_push_unique(out: *list.ArrayList[i32], id: i32) void {
-    if (!query_has_id(out, id)) {
-        list.push[i32](out, id);
-    }
-}
-
 // Collect unique component ids from every chunk overlapping [vmin, vmax].
+// Dedup via a hashmap so a k-component view costs O(k), not O(k^2) — the old
+// linear-membership check made zoomed-out views of large boards quadratic.
 fn world_query_aabb(w: *World, vmin: Vox, vmax: Vox, out: *list.ArrayList[i32]) void {
     out.*.len = 0;
+    let seen: hm.IntMap[i32] = hm.int_make[i32](256);
     let cmin: ChunkCoords = world_chunk_at(vmin);
     let cmax: ChunkCoords = world_chunk_at(vmax);
     let cx: i32 = cmin.cx;
@@ -181,7 +169,11 @@ fn world_query_aabb(w: *World, vmin: Vox, vmax: Vox, out: *list.ArrayList[i32]) 
                     let ch: *Chunk = world_chunk_ptr(w, idx);
                     let i: i32 = 0;
                     while (i < ch.*.comps.len) {
-                        query_push_unique(out, ch.*.comps.data[i]);
+                        let id: i32 = ch.*.comps.data[i];
+                        if (!hm.int_has[i32](seen, id)) {
+                            hm.int_put[i32](&seen, id, 1);
+                            list.push[i32](out, id);
+                        }
                         i = i + 1;
                     }
                 }
@@ -191,6 +183,7 @@ fn world_query_aabb(w: *World, vmin: Vox, vmax: Vox, out: *list.ArrayList[i32]) 
         }
         cx = cx + 1;
     }
+    hm.int_free[i32](&seen);
 }
 
 fn world_clear(w: *World) void {

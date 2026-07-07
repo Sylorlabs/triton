@@ -476,15 +476,26 @@ fn draw_outliner(a: *App) void {
     let w: i32 = content.w - 8;
     let y: i32 = content.y + 4 - a.*.out_scroll;
 
+    // per-kind counts in ONE pass over the scene (was one pass per group)
+    let counts: list.ArrayList[i32] = list.make[i32](kind_count());
+    let ki0: i32 = 0;
+    while (ki0 < kind_count()) { list.push[i32](&counts, 0); ki0 = ki0 + 1; }
+    let ci0: i32 = 0;
+    while (ci0 < a.*.scene.*.comps.len) {
+        let kx: i32 = kind_index(a.*.scene.*.comps.data[ci0].kind);
+        list.set[i32](&counts, kx, list.get[i32](counts, kx) + 1);
+        ci0 = ci0 + 1;
+    }
+
+    // rows scrolled out of the panel advance y but draw nothing — a 100k-part
+    // outliner costs what its visible slice costs
+    let y_lo: i32 = content.y - 16;
+    let y_hi: i32 = content.y + content.h;
+
     let gi: i32 = 0;
     while (gi < kind_count()) {
         let k: Kind = kind_at(gi);
-        let count: i32 = 0;
-        let i: i32 = 0;
-        while (i < a.*.scene.*.comps.len) {
-            if (a.*.scene.*.comps.data[i].kind == k) { count = count + 1; }
-            i = i + 1;
-        }
+        let count: i32 = list.get[i32](counts, gi);
         let open: bool = outliner_group_row(a, x, y, w, gi, kind_name(k), count);
         y = y + 17;
         if (open) {
@@ -492,22 +503,25 @@ fn draw_outliner(a: *App) void {
             while (j < a.*.scene.*.comps.len) {
                 let c: Comp = a.*.scene.*.comps.data[j];
                 if (c.kind == k) {
-                    let row: Rect = rect(x + 10, y, w - 10, 15);
-                    let selr: bool = sel_has(a, c.id);
-                    let hov: bool = hover(inp, row);
-                    if (selr) { fill_rect(f, row.x, row.y, row.w, row.h, th_accent()); }
-                    else if (hov) { fill_rect(f, row.x, row.y, row.w, row.h, th_header()); }
-                    fill_rect(f, row.x + 3, row.y + 4, 7, 7, kind_tint(k));
-                    let tcol: i64 = th_text();
-                    if (!c.visible) { tcol = th_text_dim(); }
-                    draw_text(f, row.x + 15, row.y + 3, c.name_, tcol);
-                    let eye: []u8 = "o";
-                    if (!c.visible) { eye = "-"; }
-                    if (ui_mini(f, inp, rect(row.x + row.w - 16, row.y, 14, 15), eye, th_text_dim())) {
-                        a.*.scene.*.comps.data[j].visible = !c.visible;
-                    } else if (hov && btn_released(inp, 0) && inp.*.mx < row.x + row.w - 18) {
-                        if (shift_down(inp)) { sel_toggle(a, c.id); }
-                        else { sel_set(a, c.id); }
+                    if (y > y_lo && y < y_hi) {
+                        let row: Rect = rect(x + 10, y, w - 10, 15);
+                        let selr: bool = sel_has(a, c.id);
+                        let hov: bool = hover(inp, row);
+                        if (selr) { fill_rect(f, row.x, row.y, row.w, row.h, th_accent()); }
+                        else if (hov) { fill_rect(f, row.x, row.y, row.w, row.h, th_header()); }
+                        fill_rect(f, row.x + 3, row.y + 4, 7, 7, kind_tint(k));
+                        let tcol: i64 = th_text();
+                        if (!c.visible) { tcol = th_text_dim(); }
+                        draw_text(f, row.x + 15, row.y + 3, c.name_, tcol);
+                        let eye: []u8 = "o";
+                        if (!c.visible) { eye = "-"; }
+                        if (ui_mini(f, inp, rect(row.x + row.w - 16, row.y, 14, 15), eye, th_text_dim())) {
+                            a.*.scene.*.comps.data[j].visible = !c.visible;
+                            scene_mark_render(a.*.scene);
+                        } else if (hov && btn_released(inp, 0) && inp.*.mx < row.x + row.w - 18) {
+                            if (shift_down(inp)) { sel_toggle(a, c.id); }
+                            else { sel_set(a, c.id); }
+                        }
                     }
                     y = y + 16;
                 }
@@ -516,35 +530,40 @@ fn draw_outliner(a: *App) void {
         }
         gi = gi + 1;
     }
+    list.free[i32](&counts);
 
     let open_g: bool = outliner_group_row(a, x, y, w, 5, "Waveguides", a.*.scene.*.guides.len);
     y = y + 17;
     if (open_g) {
         let j2: i32 = 0;
         while (j2 < a.*.scene.*.guides.len) {
-            let g: Guide = a.*.scene.*.guides.data[j2];
-            let row: Rect = rect(x + 10, y, w - 10, 15);
-            let selr: bool = a.*.sel_guide == g.id;
-            let hov: bool = hover(inp, row);
-            if (selr) { fill_rect(f, row.x, row.y, row.w, row.h, th_accent()); }
-            else if (hov) { fill_rect(f, row.x, row.y, row.w, row.h, th_header()); }
-            fill_rect(f, row.x + 3, row.y + 4, 7, 7, trit_color(g.live));
-            rect_outline(f, row.x + 3, row.y + 4, 7, 7, trit_rim(g.live));
-            let sci: i32 = scene_comp_index(a.*.scene, g.from_c);
-            let dci: i32 = scene_comp_index(a.*.scene, g.to_c);
-            if (sci >= 0 && dci >= 0) {
-                let t1: []u8 = _zag_str_concat(a.*.scene.*.comps.data[sci].name_, " > ");
-                let t2: []u8 = _zag_str_concat(t1, a.*.scene.*.comps.data[dci].name_);
-                draw_text(f, row.x + 15, row.y + 3, t2, th_text());
-            }
-            if (ui_mini(f, inp, rect(row.x + row.w - 16, row.y, 14, 15), "x", th_danger())) {
-                op_del_guide(&a.*.jrn, a.*.scene, g.id);
-                scene_remove_guide(a.*.scene, g.id);
-                app_mark_dirty(a);
-                if (a.*.sel_guide == g.id) { a.*.sel_guide = 0 - 1; }
-            } else if (hov && btn_released(inp, 0) && inp.*.mx < row.x + row.w - 18) {
-                a.*.sel_guide = g.id;
-                a.*.sel.len = 0;
+            if (y > y_lo && y < y_hi) {
+                let g: Guide = a.*.scene.*.guides.data[j2];
+                let row: Rect = rect(x + 10, y, w - 10, 15);
+                let selr: bool = a.*.sel_guide == g.id;
+                let hov: bool = hover(inp, row);
+                if (selr) { fill_rect(f, row.x, row.y, row.w, row.h, th_accent()); }
+                else if (hov) { fill_rect(f, row.x, row.y, row.w, row.h, th_header()); }
+                fill_rect(f, row.x + 3, row.y + 4, 7, 7, trit_color(g.live));
+                rect_outline(f, row.x + 3, row.y + 4, 7, 7, trit_rim(g.live));
+                let sci: i32 = scene_comp_index(a.*.scene, g.from_c);
+                let dci: i32 = scene_comp_index(a.*.scene, g.to_c);
+                if (sci >= 0 && dci >= 0) {
+                    let t1: []u8 = _zag_str_concat(a.*.scene.*.comps.data[sci].name_, " > ");
+                    let t2: []u8 = _zag_str_concat(t1, a.*.scene.*.comps.data[dci].name_);
+                    draw_text(f, row.x + 15, row.y + 3, t2, th_text());
+                    _zag_str_free(t1);
+                    _zag_str_free(t2);
+                }
+                if (ui_mini(f, inp, rect(row.x + row.w - 16, row.y, 14, 15), "x", th_danger())) {
+                    op_del_guide(&a.*.jrn, a.*.scene, g.id);
+                    scene_remove_guide(a.*.scene, g.id);
+                    app_mark_dirty(a);
+                    if (a.*.sel_guide == g.id) { a.*.sel_guide = 0 - 1; }
+                } else if (hov && btn_released(inp, 0) && inp.*.mx < row.x + row.w - 18) {
+                    a.*.sel_guide = g.id;
+                    a.*.sel.len = 0;
+                }
             }
             y = y + 16;
             j2 = j2 + 1;
@@ -685,24 +704,30 @@ fn draw_scope(a: *App, content: Rect) void {
     hline(f, sx + 2, mid, sw - 4, rgb(40, 42, 50));
 
     let cid: i32 = a.*.scene.*.comps.data[ci].id;
+    // collect the selected chamber's incident guides ONCE (<= 3 inputs), not
+    // per scope pixel — the old loop was O(pixels x all guides)
+    let inc: list.ArrayList[i32] = list.make[i32](4);
+    let gscan: i32 = 0;
+    while (gscan < a.*.scene.*.guides.len) {
+        if (a.*.scene.*.guides.data[gscan].to_c == cid) { list.push[i32](&inc, gscan); }
+        gscan = gscan + 1;
+    }
     let phase_anim: f64 = (a.*.frame as f64) * 0.12;
     let px_prev_sum: i32 = mid;
     let x2: i32 = 0;
     while (x2 < sw - 8) {
         let t: f64 = (x2 as f64) * 0.062831853 + phase_anim;
         let field: f64 = 0.0;
-        let gi: i32 = 0;
-        while (gi < a.*.scene.*.guides.len) {
-            let g: Guide = a.*.scene.*.guides.data[gi];
-            if (g.to_c == cid) {
-                let tr: i32 = g.live;
-                let s0: f64 = sin(t + trit_phase_pi(tr) * 3.14159265);
-                let w0: f64 = trit_amp(tr);
-                field = field + s0 * w0;
-                let cy0: i32 = mid - ((s0 * w0 * amp_px * 0.35) as i32);
-                px_set(f, sx + 4 + x2, cy0, trit_rim(tr));
-            }
-            gi = gi + 1;
+        let ii: i32 = 0;
+        while (ii < inc.len) {
+            let g: Guide = a.*.scene.*.guides.data[list.get[i32](inc, ii)];
+            let tr: i32 = g.live;
+            let s0: f64 = sin(t + trit_phase_pi(tr) * 3.14159265);
+            let w0: f64 = trit_amp(tr);
+            field = field + s0 * w0;
+            let cy0: i32 = mid - ((s0 * w0 * amp_px * 0.35) as i32);
+            px_set(f, sx + 4 + x2, cy0, trit_rim(tr));
+            ii = ii + 1;
         }
         if (field > 3.0) { field = 3.0; }
         if (field < 0.0 - 3.0) { field = 0.0 - 3.0; }
@@ -711,6 +736,7 @@ fn draw_scope(a: *App, content: Rect) void {
         px_prev_sum = cy;
         x2 = x2 + 2;
     }
+    list.free[i32](&inc);
     let out_t: i32 = sim_history(a.*.sim, cid, 0);
     draw_text(f, sx + sw - 62, sy + 4, "out", th_text_dim());
     fill_rect(f, sx + sw - 38, sy + 3, 10, 10, trit_color(out_t));
@@ -724,39 +750,24 @@ fn draw_viewport(a: *App) void {
     let f: *FB = &a.*.f;
     let vp: Rect = zone_center(a);
     fb_clip(f, vp.x, vp.y, vp.x + vp.w, vp.y + vp.h);
-    vp_clear(f, vp);
-    vp_grid(f, a.*.cam, vp);
 
+    // ── static layer via the tile cache ──────────────────────────────────────
+    // The expensive rasterization (grid, components, guide bodies) reruns only
+    // when the camera moves or the design changes; otherwise the cached
+    // pixel+depth slabs blit back in one pass and the frame costs ~nothing.
     let s: *Scene = a.*.scene;
-    let i: i32 = 0;
-    while (i < s.*.comps.len) {
-        let c: Comp = s.*.comps.data[i];
-        if (c.visible) {
-            let lod: i32 = lod_level(a.*.cam, c);
-            if (c.kind == Kind.Plate) { draw_plate(f, a.*.cam, vp, c, lod); }
-            if (c.kind == Kind.Emitter) { draw_emitter(f, a.*.cam, vp, c, lod); }
-            if (c.kind == Kind.Detector) { draw_detector(f, a.*.cam, vp, c, lod); }
-        }
-        i = i + 1;
+    let cache: *TileCache = &a.*.tile_cache;
+    tiles_marks_from_cam(cache, a.*.cam, vp);
+    tiles_marks_from_rev(cache, s.*.render_rev);
+    if (tiles_cache_ready(cache)) {
+        tiles_blit(f, vp, cache);
+    } else {
+        vp_draw_static(f, a.*.cam, vp, s, a.*.sim);
+        tiles_store_from_fb(f, vp, cache);
     }
-    let gi: i32 = 0;
-    while (gi < s.*.guides.len) {
-        let g: Guide = s.*.guides.data[gi];
-        draw_guide(f, a.*.cam, vp, g, a.*.sel_guide == g.id);
-        gi = gi + 1;
-    }
-    let i2: i32 = 0;
-    while (i2 < s.*.comps.len) {
-        let c2: Comp = s.*.comps.data[i2];
-        if (c2.visible) {
-            let lod2: i32 = lod_level(a.*.cam, c2);
-            if (c2.kind == Kind.Chamber) {
-                draw_chamber(f, a.*.cam, vp, c2, scene_soh_adjacent(s, c2.id), lod2);
-            }
-            if (c2.kind == Kind.Soh) { draw_soh(f, a.*.cam, vp, c2, lod2); }
-        }
-        i2 = i2 + 1;
-    }
+
+    // ── dynamic overlay (every frame, z-tested against the cached depth) ─────
+    vp_draw_live(f, a.*.cam, vp, s, a.*.sim, a.*.sel_guide);
 
     // place ghost
     if (a.*.ghost_ok >= 0 && !a.*.moving) {
@@ -831,25 +842,7 @@ fn draw_viewport(a: *App) void {
         si = si + 1;
     }
 
-    // detector live badges
-    let di: i32 = 0;
-    while (di < s.*.comps.len) {
-        let c6: Comp = s.*.comps.data[di];
-        if (c6.kind == Kind.Detector && c6.visible) {
-            let ctr2: Vec3 = vox_center(c6.origin);
-            let above: Vec3 = v3(ctr2.x, ctr2.y + 1.1, ctr2.z);
-            let pp: P3 = vp_proj(a.*.cam, vp, above);
-            if (pp.ok) {
-                let t: i32 = sim_history(a.*.sim, c6.id, 0);
-                let bx: i32 = (pp.x as i32) - 7;
-                let by: i32 = (pp.y as i32) - 7;
-                fill_rect(f, bx, by, 14, 14, trit_color(t));
-                rect_outline(f, bx, by, 14, 14, trit_rim(t));
-                draw_text(f, bx + 5, by + 4, trit_glyph(t), rgb(240, 240, 245));
-            }
-        }
-        di = di + 1;
-    }
+    // (detector live badges are painted by vp_draw_live above)
 
     // navigation hint (bottom left, single dim line)
     draw_text(f, vp.x + 8, vp.y + vp.h - 15, "MMB orbit   Shift+MMB pan   wheel zoom", th_text_dim());

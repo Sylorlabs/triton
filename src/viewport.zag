@@ -795,84 +795,150 @@ fn vp_viewport_bounds(cam: Cam, clip: Rect) VoxBounds {
     return b;
 }
 
-fn vp_id_in_list(ids: list.ArrayList[i32], id: i32) bool {
+// Draw scene components; uses world_query_aabb when comps.len > 64.
+// Fill `out` with the ids of components worth drawing: the whole scene when
+// small, a frustum-bounds chunk query when large.
+fn vp_collect_visible(s: *Scene, cam: Cam, clip: Rect, out: *list.ArrayList[i32]) bool {
+    let use_query: bool = s.*.comps.len > vp_query_threshold();
+    if (use_query) {
+        let bounds: VoxBounds = vp_viewport_bounds(cam, clip);
+        world_query_aabb(s.*.world, bounds.vmin, bounds.vmax, out);
+    } else {
+        out.*.len = 0;
+        let ai: i32 = 0;
+        while (ai < s.*.comps.len) {
+            list.push[i32](out, s.*.comps.data[ai].id);
+            ai = ai + 1;
+        }
+    }
+    return use_query;
+}
+
+// True when any voxel of the guide's routed path touches the view bounds.
+fn vp_guide_in_bounds(g: Guide, b: VoxBounds) bool {
     let i: i32 = 0;
-    while (i < ids.len) {
-        if (ids.data[i] == id) { return true; }
+    while (i < g.path.len) {
+        let v: Vox = list.get[Vox](g.path, i);
+        if (v.x >= b.vmin.x && v.x <= b.vmax.x &&
+            v.y >= b.vmin.y && v.y <= b.vmax.y &&
+            v.z >= b.vmin.z && v.z <= b.vmax.z) { return true; }
         i = i + 1;
     }
     return false;
 }
 
-fn vp_should_draw(id: i32, use_query: bool, visible: list.ArrayList[i32], sel: list.ArrayList[i32]) bool {
-    if (!use_query) { return true; }
-    if (vp_id_in_list(sel, id)) { return true; }
-    return vp_id_in_list(visible, id);
+// Guide body without live state: the neutral dark carrier color. Live trits
+// are painted by the overlay pass so the sim never invalidates this layer.
+fn draw_guide_base(f: *FB, cam: Cam, clip: Rect, g: Guide) void {
+    let dark: Guide = g;
+    dark.live = 0;
+    draw_guide(f, cam, clip, dark, false);
 }
 
-// Draw scene components; uses world_query_aabb when comps.len > 64.
-fn vp_draw_components(
-    f: *FB,
-    cam: Cam,
-    clip: Rect,
-    s: *Scene,
-    sim: *Sim,
-    sel: list.ArrayList[i32],
-    sel_guide: i32,
-) void {
-    let use_query: bool = s.*.comps.len > vp_query_threshold();
-    let visible: list.ArrayList[i32] = list.make[i32](128);
-    if (use_query) {
-        let bounds: VoxBounds = vp_viewport_bounds(cam, clip);
-        world_query_aabb(s.*.world, bounds.vmin, bounds.vmax, &visible);
-    }
+// ── STATIC scene layer ────────────────────────────────────────────────────────
+// Everything that only changes when the design (or camera) changes: grid,
+// culled components, guide bodies. Rasterized once into the viewport tile
+// cache; per-frame dynamics (live trits, selection, ghosts) overlay on top.
+fn vp_draw_static(f: *FB, cam: Cam, clip: Rect, s: *Scene, sim: *Sim) void {
+    vp_clear(f, clip);
+    vp_grid(f, cam, clip);
 
+    let ids: list.ArrayList[i32] = list.make[i32](128);
+    let use_query: bool = vp_collect_visible(s, cam, clip, &ids);
+    let b: VoxBounds = vp_viewport_bounds(cam, clip);
+
+    // pass 1: opaque bodies
     let i: i32 = 0;
-    while (i < s.*.comps.len) {
-        let c: Comp = s.*.comps.data[i];
-        if (c.visible && vp_should_draw(c.id, use_query, visible, sel)) {
-            let lod: i32 = lod_level(cam, c);
-            if (c.kind == Kind.Plate) { draw_plate(f, cam, clip, c, lod); }
-            if (c.kind == Kind.Emitter) { draw_emitter(f, cam, clip, c, lod); }
-            if (c.kind == Kind.Detector) { draw_detector(f, cam, clip, c, lod); }
+    while (i < ids.len) {
+        let ci: i32 = scene_comp_index(s, ids.data[i]);
+        if (ci >= 0) {
+            let c: Comp = s.*.comps.data[ci];
+            if (c.visible) {
+                let lod: i32 = lod_level(cam, c);
+                if (c.kind == Kind.Plate) { draw_plate(f, cam, clip, c, lod); }
+                if (c.kind == Kind.Emitter) { draw_emitter(f, cam, clip, c, lod); }
+                if (c.kind == Kind.Detector) { draw_detector(f, cam, clip, c, lod); }
+            }
         }
         i = i + 1;
     }
+
+    // guide bodies (culled by routed-path bounds when querying)
     let gi: i32 = 0;
     while (gi < s.*.guides.len) {
         let g: Guide = s.*.guides.data[gi];
-        draw_guide(f, cam, clip, g, sel_guide == g.id);
+        if (!use_query || vp_guide_in_bounds(g, b)) {
+            draw_guide_base(f, cam, clip, g);
+        }
         gi = gi + 1;
     }
+
+    // pass 2: translucent bodies (chambers, SOH crystal)
     let i2: i32 = 0;
-    while (i2 < s.*.comps.len) {
-        let c2: Comp = s.*.comps.data[i2];
-        if (c2.visible && vp_should_draw(c2.id, use_query, visible, sel)) {
-            let lod2: i32 = lod_level(cam, c2);
-            if (c2.kind == Kind.Chamber) {
-                draw_chamber(f, cam, clip, c2, scene_soh_adjacent(s, c2.id), lod2);
+    while (i2 < ids.len) {
+        let ci2: i32 = scene_comp_index(s, ids.data[i2]);
+        if (ci2 >= 0) {
+            let c2: Comp = s.*.comps.data[ci2];
+            if (c2.visible) {
+                let lod2: i32 = lod_level(cam, c2);
+                if (c2.kind == Kind.Chamber) {
+                    // soh depth from the compiled sim node (cached adjacency)
+                    let ni: i32 = sim_node_index(sim, c2.id);
+                    let soh: i32 = 0;
+                    if (ni >= 0) { soh = sim.*.nodes.data[ni].soh; }
+                    else { soh = scene_soh_adjacent(s, c2.id); }
+                    draw_chamber(f, cam, clip, c2, soh, lod2);
+                }
+                if (c2.kind == Kind.Soh) { draw_soh(f, cam, clip, c2, lod2); }
             }
-            if (c2.kind == Kind.Soh) { draw_soh(f, cam, clip, c2, lod2); }
         }
         i2 = i2 + 1;
     }
+    list.free[i32](&ids);
+}
+
+// ── DYNAMIC overlay ───────────────────────────────────────────────────────────
+// Painted every frame over the blitted static layer (z-tested against its
+// cached depth): live carrier states and detector badges.
+fn vp_draw_live(f: *FB, cam: Cam, clip: Rect, s: *Scene, sim: *Sim, sel_guide: i32) void {
+    let use_query: bool = s.*.comps.len > vp_query_threshold();
+    let b: VoxBounds = vp_viewport_bounds(cam, clip);
+
+    // guides carrying a non-dark trit (or selected) repaint in state color
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        let g: Guide = s.*.guides.data[gi];
+        if (g.live != 0 || g.id == sel_guide) {
+            if (!use_query || vp_guide_in_bounds(g, b)) {
+                draw_guide(f, cam, clip, g, g.id == sel_guide);
+            }
+        }
+        gi = gi + 1;
+    }
+
+    // detector badges
+    let ids: list.ArrayList[i32] = list.make[i32](128);
+    let _uq: bool = vp_collect_visible(s, cam, clip, &ids);
     let di: i32 = 0;
-    while (di < s.*.comps.len) {
-        let c6: Comp = s.*.comps.data[di];
-        if (c6.kind == Kind.Detector && c6.visible && vp_should_draw(c6.id, use_query, visible, sel)) {
-            let ctr2: Vec3 = vox_center(c6.origin);
-            let above: Vec3 = v3(ctr2.x, ctr2.y + 1.1, ctr2.z);
-            let pp: P3 = vp_proj(cam, clip, above);
-            if (pp.ok) {
-                let t: i32 = sim_history(sim, c6.id, 0);
-                let bx: i32 = (pp.x as i32) - 7;
-                let by: i32 = (pp.y as i32) - 7;
-                fill_rect(f, bx, by, 14, 14, trit_color(t));
-                rect_outline(f, bx, by, 14, 14, trit_rim(t));
-                draw_text(f, bx + 5, by + 4, trit_glyph(t), rgb(240, 240, 245));
+    while (di < ids.len) {
+        let ci: i32 = scene_comp_index(s, ids.data[di]);
+        if (ci >= 0) {
+            let c6: Comp = s.*.comps.data[ci];
+            if (c6.kind == Kind.Detector && c6.visible) {
+                let ctr2: Vec3 = vox_center(c6.origin);
+                let above: Vec3 = v3(ctr2.x, ctr2.y + 1.1, ctr2.z);
+                let pp: P3 = vp_proj(cam, clip, above);
+                if (pp.ok) {
+                    let t: i32 = sim_history(sim, c6.id, 0);
+                    let bx: i32 = (pp.x as i32) - 7;
+                    let by: i32 = (pp.y as i32) - 7;
+                    fill_rect(f, bx, by, 14, 14, trit_color(t));
+                    rect_outline(f, bx, by, 14, 14, trit_rim(t));
+                    draw_text(f, bx + 5, by + 4, trit_glyph(t), rgb(240, 240, 245));
+                }
             }
         }
         di = di + 1;
     }
-    list.free[i32](&visible);
+    list.free[i32](&ids);
 }

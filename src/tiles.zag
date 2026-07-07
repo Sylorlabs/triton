@@ -24,6 +24,7 @@ struct TileCache {
     zb: list.ArrayList[i64],
     // camera movement tracking (threshold-based)
     prev_valid: i32,
+    prev_rev: i64,     // scene render revision the cached layer was built from
     prev_yaw: f64,
     prev_pitch: f64,
     prev_dist: f64,
@@ -54,6 +55,7 @@ fn tiles_cache_new() TileCache {
         .px = list.make[i64](1),
         .zb = list.make[i64](1),
         .prev_valid = 0,
+        .prev_rev = 0,
         .prev_yaw = 0.0,
         .prev_pitch = 0.0,
         .prev_dist = 0.0,
@@ -115,6 +117,14 @@ fn tiles_mark_all_dirty(cache: *TileCache) void {
         cache.*.dirty.data[i] = 1;
         cache.*.valid.data[i] = 0;
         i = i + 1;
+    }
+}
+
+// Invalidate when the design changed since the cached layer was built.
+fn tiles_marks_from_rev(cache: *TileCache, rev: i64) void {
+    if (rev != cache.*.prev_rev) {
+        tiles_mark_all_dirty(cache);
+        cache.*.prev_rev = rev;
     }
 }
 
@@ -220,12 +230,8 @@ fn tiles_blit(f: *FB, vp: Rect, cache: *TileCache) void {
                 while (yy < th) {
                     let src_row: i32 = dst_base + yy * TILE_SIZE();
                     let dst_row: i32 = (y0 + yy) * f.*.w + x0;
-                    let xx: i32 = 0;
-                    while (xx < tw) {
-                        f.*.px.data[dst_row + xx] = cache.*.px.data[src_row + xx];
-                        f.*.zb.data[dst_row + xx] = cache.*.zb.data[src_row + xx];
-                        xx = xx + 1;
-                    }
+                    _zag_memcpy((&f.*.px.data[dst_row]) as *i8, (&cache.*.px.data[src_row]) as *i8, tw * 8);
+                    _zag_memcpy((&f.*.zb.data[dst_row]) as *i8, (&cache.*.zb.data[src_row]) as *i8, tw * 8);
                     yy = yy + 1;
                 }
             }
@@ -252,12 +258,8 @@ fn tiles_store_from_fb(f: *FB, vp: Rect, cache: *TileCache) void {
             while (yy < th) {
                 let dst_row: i32 = dst_base + yy * TILE_SIZE();
                 let src_row: i32 = (y0 + yy) * f.*.w + x0;
-                let xx: i32 = 0;
-                while (xx < tw) {
-                    cache.*.px.data[dst_row + xx] = f.*.px.data[src_row + xx];
-                    cache.*.zb.data[dst_row + xx] = f.*.zb.data[src_row + xx];
-                    xx = xx + 1;
-                }
+                _zag_memcpy((&cache.*.px.data[dst_row]) as *i8, (&f.*.px.data[src_row]) as *i8, tw * 8);
+                _zag_memcpy((&cache.*.zb.data[dst_row]) as *i8, (&f.*.zb.data[src_row]) as *i8, tw * 8);
                 yy = yy + 1;
             }
             cache.*.dirty.data[ti] = 0;

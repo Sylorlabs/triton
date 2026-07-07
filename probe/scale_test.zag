@@ -95,14 +95,25 @@ fn main() i32 {
     sim_recompile_region(a.*.sim, s);
     print_kv("edit_patch_ms", _zag_clock_monotonic_ms() - t4);
 
-    // frame-all camera then measure frames
+    // frame-all camera then measure: first frame pays the static-layer
+    // rasterization; steady frames blit the tile cache
     app_action(a, 21);
     a.*.inp.w = 1440;
     a.*.inp.h = 900;
     let t5: i64 = _zag_clock_monotonic_ms();
+    app_frame(a, 0.016);
+    print_kv("frame_first_ms", _zag_clock_monotonic_ms() - t5);
+    let t6: i64 = _zag_clock_monotonic_ms();
     let fr: i32 = 0;
-    while (fr < 5) { app_frame(a, 0.016); fr = fr + 1; }
-    print_kv("frame_ms_avg", (_zag_clock_monotonic_ms() - t5) / 5);
+    while (fr < 10) { app_frame(a, 0.016); fr = fr + 1; }
+    print_kv("frame_cached_ms", (_zag_clock_monotonic_ms() - t6) / 10);
+    // playing sim: overlay repaints live guides, static layer stays cached
+    a.*.sim.*.playing = true;
+    a.*.sim.*.speed = 60.0;
+    let t7: i64 = _zag_clock_monotonic_ms();
+    let fr2: i32 = 0;
+    while (fr2 < 10) { app_frame(a, 0.016); fr2 = fr2 + 1; }
+    print_kv("frame_playing_ms", (_zag_clock_monotonic_ms() - t7) / 10);
     _zag_println("");
     return 0;
 }

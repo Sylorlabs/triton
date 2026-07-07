@@ -53,7 +53,8 @@ struct Scene {
     topo_dirty_ids: list.ArrayList[i32],  // comps needing incremental sim patch
     topo_guides_dirty: bool,        // waveguide graph changed
     topo_full_rebuild: bool,        // clear/load -> full sim recompile
-}
+    render_rev: i64,                // bumped on any visual change (geometry,
+}                                   // visibility) -> viewport cache invalidates
 
 fn scene_new() *Scene {
     let s: *Scene = new(Scene{
@@ -75,6 +76,7 @@ fn scene_new() *Scene {
         .topo_dirty_ids = list.make[i32](8),
         .topo_guides_dirty = true,
         .topo_full_rebuild = true,
+        .render_rev = 1,
     });
     let i: i32 = 0;
     while (i < kind_count()) {
@@ -621,20 +623,30 @@ fn scene_topo_unique_push(s: *Scene, id: i32) void {
     list.push[i32](&s.*.topo_dirty_ids, id);
 }
 
+// Any visual change (geometry, visibility, guide routing) bumps this; the
+// viewport's tile cache compares it to decide whether the static scene layer
+// must re-rasterize. Sim state does NOT bump it — live trits are an overlay.
+fn scene_mark_render(s: *Scene) void {
+    s.*.render_rev = s.*.render_rev + 1;
+}
+
 fn scene_mark_topo_comp(s: *Scene, id: i32) void {
     s.*.topo_dirty = true;
     scene_topo_unique_push(s, id);
+    scene_mark_render(s);
 }
 
 fn scene_mark_topo_guides(s: *Scene) void {
     s.*.topo_dirty = true;
     s.*.topo_guides_dirty = true;
+    scene_mark_render(s);
 }
 
 fn scene_mark_topo_full(s: *Scene) void {
     s.*.topo_dirty = true;
     s.*.topo_full_rebuild = true;
     s.*.topo_guides_dirty = true;
+    scene_mark_render(s);
 }
 
 fn scene_topo_clear(s: *Scene) void {
