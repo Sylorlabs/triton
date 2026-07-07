@@ -1,0 +1,168 @@
+// sim_region.zag — incremental simulation recompile.
+// When topology changes touch only a few components, patch the dataflow graph
+// instead of rebuilding every SNode/SGuide and resetting symbol time.
+// Falls back to sim_recompile on clear/load or when the dirty set is large.
+
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("voxel.zag")
+@import("components.zag")
+@import("scene.zag")
+@import("ternary.zag")
+
+fn sim_patch_threshold() i32 { return 8; }
+
+fn sim_node_reset(n: *SNode) void {
+    n.*.input_sum = 0;
+    n.*.out_t = 0;
+    n.*.prev_t = 0;
+    let hi: i32 = 0;
+    while (hi < hist_len()) {
+        list.set[i32](&n.*.hist, hi, 0);
+        hi = hi + 1;
+    }
+}
+
+fn sim_make_node(s: *Scene, c: Comp) SNode {
+    let n: SNode = SNode{
+        .comp_id = c.id,
+        .kind = c.kind,
+        .soh = 0,
+        .input_sum = 0,
+        .out_t = 0,
+        .prev_t = 0,
+        .hist = list.make[i32](hist_len()),
+    };
+    if (c.kind == Kind.Chamber) { n.soh = scene_soh_adjacent(s, c.id); }
+    let hi: i32 = 0;
+    while (hi < hist_len()) {
+        list.push[i32](&n.hist, 0);
+        hi = hi + 1;
+    }
+    return n;
+}
+
+fn sim_remove_node_at(sim: *Sim, ni: i32) void {
+    let removed_id: i32 = sim.*.nodes.data[ni].comp_id;
+    list.free[i32](&sim.*.nodes.data[ni].hist);
+    let last: i32 = sim.*.nodes.len - 1;
+    if (ni != last) {
+        let moved: SNode = sim.*.nodes.data[last];
+        sim.*.nodes.data[ni] = moved;
+        hm.int_put[i32](&sim.*.nidx, moved.comp_id, ni);
+    }
+    sim.*.nodes.len = sim.*.nodes.len - 1;
+    let _gone: bool = hm.int_del[i32](&sim.*.nidx, removed_id);
+}
+
+// Update or insert the node for `comp_id`; remove it when the comp is gone.
+fn sim_patch_comp(sim: *Sim, s: *Scene, comp_id: i32) void {
+    let ci: i32 = scene_comp_index(s, comp_id);
+    let ni: i32 = sim_node_index(sim, comp_id);
+    if (ci < 0) {
+        if (ni >= 0) { sim_remove_node_at(sim, ni); }
+        return;
+    }
+    let c: Comp = s.*.comps.data[ci];
+    if (ni < 0) {
+        let n: SNode = sim_make_node(s, c);
+        hm.int_put[i32](&sim.*.nidx, c.id, sim.*.nodes.len);
+        list.push[SNode](&sim.*.nodes, n);
+        return;
+    }
+    let n2: *SNode = &sim.*.nodes.data[ni];
+    n2.*.kind = c.kind;
+    n2.*.soh = 0;
+    if (c.kind == Kind.Chamber) { n2.*.soh = scene_soh_adjacent(s, c.id); }
+    sim_node_reset(n2);
+}
+
+fn sim_find_sguide(sim: *Sim, guide_id: i32) i32 {
+    let i: i32 = 0;
+    while (i < sim.*.sguides.len) {
+        if (sim.*.sguides.data[i].guide_id == guide_id) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+fn sim_make_sguide(g: Guide) SGuide {
+    let delay: i32 = guide_delay_symbols(g.path.len);
+    let sg: SGuide = SGuide{
+        .guide_id = g.id,
+        .from_c = g.from_c,
+        .to_c = g.to_c,
+        .delay = delay,
+        .ring = list.make[i32](delay),
+        .head = 0,
+        .arrived = 0,
+    };
+    let ri: i32 = 0;
+    while (ri < delay) {
+        list.push[i32](&sg.ring, 0);
+        ri = ri + 1;
+    }
+    return sg;
+}
+
+// Rebuild sguides from the scene; preserve delay-line state when possible.
+fn sim_patch_guides(sim: *Sim, s: *Scene) void {
+    let gi0: i32 = 0;
+    while (gi0 < sim.*.sguides.len) {
+        list.free[i32](&sim.*.sguides.data[gi0].ring);
+        gi0 = gi0 + 1;
+    }
+    sim.*.sguides.len = 0;
+
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        let g: Guide = s.*.guides.data[gi];
+        let sg: SGuide = sim_make_sguide(g);
+        let prev: i32 = sim_find_sguide(sim, g.id);
+        if (prev >= 0) {
+            let old: SGuide = sim.*.sguides.data[prev];
+            if (old.delay == sg.delay) {
+                sg.head = old.head;
+                sg.arrived = old.arrived;
+                let ri: i32 = 0;
+                while (ri < sg.delay) {
+                    list.set[i32](&sg.ring, ri, list.get[i32](old.ring, ri));
+                    ri = ri + 1;
+                }
+            }
+        }
+        list.push[SGuide](&sim.*.sguides, sg);
+        s.*.guides.data[gi].live = 0;
+        gi = gi + 1;
+    }
+}
+
+fn sim_should_full_rebuild(sim: *Sim, s: *Scene) bool {
+    if (s.*.topo_full_rebuild) { return true; }
+    if (sim.*.nodes.len == 0) { return true; }
+    let n_dirty: i32 = s.*.topo_dirty_ids.len;
+    if (n_dirty == 0 && !s.*.topo_guides_dirty) { return false; }
+    let thresh: i32 = sim_patch_threshold();
+    let quarter: i32 = s.*.comps.len / 4;
+    if (quarter > thresh) { thresh = quarter; }
+    if (n_dirty > thresh) { return true; }
+    return false;
+}
+
+// Patch or full-rebuild the fabric; clears scene topo flags on success.
+fn sim_recompile_region(sim: *Sim, s: *Scene) void {
+    if (sim_should_full_rebuild(sim, s)) {
+        sim_recompile(sim, s);
+        scene_topo_clear(s);
+        return;
+    }
+    let di: i32 = 0;
+    while (di < s.*.topo_dirty_ids.len) {
+        sim_patch_comp(sim, s, s.*.topo_dirty_ids.data[di]);
+        di = di + 1;
+    }
+    if (s.*.topo_guides_dirty) {
+        sim_patch_guides(sim, s);
+    }
+    scene_topo_clear(s);
+}

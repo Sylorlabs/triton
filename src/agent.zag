@@ -1,0 +1,925 @@
+// agent.zag — headless agent RPC for CLI and MCP wrappers.
+//
+// Protocol (stdin/stdout, one command per line):
+//   Request:  <verb> [args...]
+//   Response: OK [message]          — success, optional one-line payload
+//             OK                    — start of multi-line block
+//             <data lines>
+//             .                     — end of block
+//             ERR <message>         — failure
+//
+// Examples:
+//   place plate 6 0 10 0     -> OK id=3 name=GeSn_Plate.1
+//   list                     -> OK + component/guide lines + .
+//   sim step 24              -> OK symbol=24
+//   test engine              -> OK passed (runs ./probe/engine_test)
+
+@import("../std/list.zag") as list
+@import("ioline.zag")
+@import("app.zag")
+
+extern fn _zag_raw_syscall(num: i64, a1: i64, a2: i64, a3: i64, a4: i64, a5: i64, a6: i64) i64;
+extern fn _zag_read_fd(fd: i64, buf: *i8, n: i64) i64;
+@import("workspace.zag")
+@import("routing.zag")
+@import("sim.zag")
+@import("editops.zag")
+@import("demo.zag")
+@import("session.zag")
+@import("ternary.zag")
+
+struct Tok {
+    off: i32,
+    len: i32,
+}
+
+fn tok_slice(line: []u8, t: Tok) []u8 {
+    return line[t.off..t.off + t.len];
+}
+
+fn tokenize(line: []u8, out: *list.ArrayList[Tok]) void {
+    out.*.len = 0;
+    let i: i32 = 0;
+    while (i < line.len) {
+        while (i < line.len && (line[i] as i32) == 32) { i = i + 1; }
+        if (i >= line.len) { return; }
+        let st: i32 = i;
+        while (i < line.len && (line[i] as i32) != 32) { i = i + 1; }
+        list.push[Tok](out, Tok{ .off = st, .len = i - st });
+    }
+}
+
+fn tok_eq(line: []u8, t: Tok, lit: []u8) bool {
+    if (t.len != lit.len) { return false; }
+    let i: i32 = 0;
+    while (i < t.len) {
+        if ((line[t.off + i] as i32) != (lit[i] as i32)) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn parse_kind_name(s: []u8) i32 {
+    if (_zag_strcmp(s, "plate") == 1) { return 0; }
+    if (_zag_strcmp(s, "gesn") == 1) { return 0; }
+    if (_zag_strcmp(s, "chamber") == 1) { return 1; }
+    if (_zag_strcmp(s, "exec") == 1) { return 1; }
+    if (_zag_strcmp(s, "soh") == 1) { return 2; }
+    if (_zag_strcmp(s, "emitter") == 1) { return 3; }
+    if (_zag_strcmp(s, "laser") == 1) { return 3; }
+    if (_zag_strcmp(s, "wdm") == 1) { return 3; }
+    if (_zag_strcmp(s, "detector") == 1) { return 4; }
+    if (_zag_strcmp(s, "sensor") == 1) { return 4; }
+    if (_zag_strcmp(s, "mos2") == 1) { return 4; }
+    return 0 - 1;
+}
+
+fn kind_slug(k: Kind) []u8 {
+    if (k == Kind.Plate) { return "plate"; }
+    if (k == Kind.Chamber) { return "chamber"; }
+    if (k == Kind.Soh) { return "soh"; }
+    if (k == Kind.Emitter) { return "emitter"; }
+    return "detector";
+}
+
+fn agent_flush() void { _zag_flush(); }
+
+fn agent_ok1(msg: []u8) void {
+    _zag_print("OK ");
+    _zag_println(msg);
+    agent_flush();
+}
+
+fn agent_ok0() void {
+    _zag_println("OK");
+    agent_flush();
+}
+
+fn agent_err(msg: []u8) void {
+    _zag_print("ERR ");
+    _zag_println(msg);
+    agent_flush();
+}
+
+fn agent_dot() void {
+    _zag_println(".");
+    agent_flush();
+}
+
+fn agent_print_i(name_: []u8, v: i64) void {
+    _zag_print(name_);
+    _zag_print(_zag_i64_to_str(v));
+}
+
+fn agent_print_vox(v: Vox) void {
+    agent_print_i("", v.x as i64);
+    _zag_print(",");
+    agent_print_i("", v.y as i64);
+    _zag_print(",");
+    agent_print_i("", v.z as i64);
+}
+
+fn agent_print_guide_path(g: Guide) void {
+    _zag_print(" path=");
+    let pi: i32 = 0;
+    while (pi < g.path.len) {
+        if (pi > 0) { _zag_print(" "); }
+        agent_print_vox(g.path.data[pi]);
+        pi = pi + 1;
+    }
+}
+
+fn tok_i64(line: []u8, t: Tok) i64 {
+    return _zag_str_to_i64(tok_slice(line, t));
+}
+
+fn agent_help() void {
+    agent_ok0();
+    _zag_println("# triton agent commands");
+    _zag_println("ping | help | quit");
+    _zag_println("new | demo | open <file.zpa> | save <file.zpa> | list_files");
+    _zag_println("place <kind> <x> <y> <z> [rot] | place_here <kind> [rot] | place_on <kind> <plate> <lx> <lz> [rot]");
+    _zag_println("delete <id> | route <fc> <fp> <tc> <tp>");
+    _zag_println("can_place <kind> <x> <y> <z> [rot] | list | get <id> | select <id>");
+    _zag_println("undo | redo | view | pick | open [file.zpa] | save [file.zpa]  (default: live session)");
+    _zag_println("sim step [n] | sim reset | sim state | render <out.bmp>");
+    _zag_println("status | coords | power | perf | kinds");
+    _zag_println("test engine | test smoke | build");
+    _zag_println("kinds: plate chamber soh emitter detector");
+    agent_dot();
+}
+
+fn agent_status(a: *App) void {
+    let play: i64 = 0;
+    if (a.*.sim.*.playing) { play = 1; }
+    let spd: i64 = a.*.sim.*.speed as i64;
+    let msg: []u8 = _zag_str_concat("frame=", _zag_i64_to_str(a.*.frame));
+    let m2: []u8 = _zag_str_concat(msg, " comps=");
+    let m3: []u8 = _zag_str_concat(m2, _zag_i64_to_str(a.*.scene.*.comps.len as i64));
+    let m4: []u8 = _zag_str_concat(m3, " guides=");
+    let m5: []u8 = _zag_str_concat(m4, _zag_i64_to_str(a.*.scene.*.guides.len as i64));
+    let m6: []u8 = _zag_str_concat(m5, " symbol=");
+    let m7: []u8 = _zag_str_concat(m6, _zag_i64_to_str(a.*.sim.*.symbol));
+    let m8: []u8 = _zag_str_concat(m7, " playing=");
+    let m9: []u8 = _zag_str_concat(m8, _zag_i64_to_str(play));
+    let m10: []u8 = _zag_str_concat(m9, " speed=");
+    let m11: []u8 = _zag_str_concat(m10, _zag_i64_to_str(spd));
+    let m12: []u8 = _zag_str_concat(m11, " frame_ms=");
+    let m13: []u8 = _zag_str_concat(m12, _zag_i64_to_str(a.*.frame_ms));
+    let m14: []u8 = _zag_str_concat(m13, " file=");
+    let m15: []u8 = _zag_str_concat(m14, a.*.file_);
+    let m16: []u8 = _zag_str_concat(m15, " undo=");
+    let m17: []u8 = _zag_str_concat(m16, _zag_i64_to_str(journal_undo_len(&a.*.jrn) as i64));
+    let m18: []u8 = _zag_str_concat(m17, " redo=");
+    agent_ok1(_zag_str_concat(m18, _zag_i64_to_str(journal_redo_len(&a.*.jrn) as i64)));
+}
+
+fn agent_coords(a: *App) void {
+    let s: *Scene = a.*.scene;
+    agent_ok0();
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        let c: Comp = s.*.comps.data[i];
+        _zag_print("C ");
+        agent_print_i("", c.id as i64);
+        _zag_print(" ");
+        _zag_print(kind_slug(c.kind));
+        _zag_print(" ");
+        agent_print_i("", c.origin.x as i64);
+        _zag_print(" ");
+        agent_print_i("", c.origin.y as i64);
+        _zag_print(" ");
+        agent_print_i("", c.origin.z as i64);
+        _zag_print(" rot=");
+        agent_print_i("", c.rot as i64);
+        _zag_println("");
+        let pi: i32 = 0;
+        while (pi < kind_port_count(c.kind)) {
+            let p: Port = kind_port(c.kind, pi);
+            let cell: Vox = comp_port_cell(c, pi);
+            let attach: Vox = comp_port_attach(c, pi);
+            _zag_print("P ");
+            agent_print_i("", c.id as i64);
+            _zag_print(" ");
+            agent_print_i("", pi as i64);
+            _zag_print(" ");
+            _zag_print(p.label);
+            _zag_print(" ");
+            agent_print_i("", cell.x as i64);
+            _zag_print(" ");
+            agent_print_i("", cell.y as i64);
+            _zag_print(" ");
+            agent_print_i("", cell.z as i64);
+            _zag_print(" ");
+            agent_print_i("", attach.x as i64);
+            _zag_print(" ");
+            agent_print_i("", attach.y as i64);
+            _zag_print(" ");
+            _zag_println(_zag_i64_to_str(attach.z as i64));
+            pi = pi + 1;
+        }
+        i = i + 1;
+    }
+    agent_dot();
+}
+
+fn agent_power(a: *App) void {
+    sim_recompile(a.*.sim, a.*.scene);
+    agent_ok0();
+    let i: i32 = 0;
+    while (i < a.*.scene.*.comps.len) {
+        let c: Comp = a.*.scene.*.comps.data[i];
+        if (c.kind == Kind.Emitter) {
+            let t: i32 = sim_history(a.*.sim, c.id, 0);
+            _zag_print("E ");
+            agent_print_i("", c.id as i64);
+            _zag_print(" ");
+            _zag_print(c.name_);
+            _zag_print(" wl_nm=");
+            agent_print_i("", c.wl_nm as i64);
+            _zag_print(" live=");
+            _zag_println(trit_glyph(t));
+        }
+        i = i + 1;
+    }
+    let gi: i32 = 0;
+    while (gi < a.*.scene.*.guides.len) {
+        let g: Guide = a.*.scene.*.guides.data[gi];
+        _zag_print("W ");
+        agent_print_i("", g.id as i64);
+        _zag_print(" live=");
+        _zag_println(trit_glyph(g.live));
+        gi = gi + 1;
+    }
+    let ci: i32 = 0;
+    while (ci < a.*.sim.*.nodes.len) {
+        let n: SNode = a.*.sim.*.nodes.data[ci];
+        if (n.kind == Kind.Chamber) {
+            _zag_print("C ");
+            agent_print_i("", n.comp_id as i64);
+            _zag_print(" interference=");
+            agent_print_i("", n.input_sum as i64);
+            _zag_print(" out=");
+            _zag_println(trit_glyph(n.out_t));
+        }
+        ci = ci + 1;
+    }
+    agent_dot();
+}
+
+fn agent_perf_place(a: *App) i64 {
+    let t0: i64 = _zag_clock_monotonic_ms();
+    let _code: i32 = scene_can_place(a.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    return _zag_clock_monotonic_ms() - t0;
+}
+
+fn agent_find_port_comp(s: *Scene, start: i32) i32 {
+    let i: i32 = start;
+    while (i < s.*.comps.len) {
+        if (kind_port_count(s.*.comps.data[i].kind) > 0) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+fn agent_perf_route(a: *App) i64 {
+    let s: *Scene = a.*.scene;
+    if (s.*.comps.len < 2) { return 0; }
+    let fi: i32 = agent_find_port_comp(s, 0);
+    if (fi < 0) { return 0; }
+    let ti: i32 = agent_find_port_comp(s, fi + 1);
+    if (ti < 0) { return 0; }
+    let src: Comp = s.*.comps.data[fi];
+    let dst: Comp = s.*.comps.data[ti];
+    let start: Vox = comp_port_attach(src, 0);
+    let goal: Vox = comp_port_attach(dst, 0);
+    let path: list.ArrayList[Vox] = list.make[Vox](32);
+    let t0: i64 = _zag_clock_monotonic_ms();
+    let _ok: bool = route_guide(s, start, goal, &path);
+    let ms: i64 = _zag_clock_monotonic_ms() - t0;
+    list.free[Vox](&path);
+    return ms;
+}
+
+fn agent_perf_render(a: *App) i64 {
+    let t0: i64 = _zag_clock_monotonic_ms();
+    app_frame(a, 0.0);
+    let ms: i64 = _zag_clock_monotonic_ms() - t0;
+    a.*.frame_ms = ms;
+    a.*.frame = a.*.frame + 1;
+    return ms;
+}
+
+fn agent_perf(a: *App) void {
+    let place_ms: i64 = agent_perf_place(a);
+    let route_ms: i64 = agent_perf_route(a);
+    let render_ms: i64 = agent_perf_render(a);
+    let total_ms: i64 = place_ms + route_ms + render_ms;
+    let msg: []u8 = _zag_str_concat("place_ms=", _zag_i64_to_str(place_ms));
+    let m2: []u8 = _zag_str_concat(msg, " route_ms=");
+    let m3: []u8 = _zag_str_concat(m2, _zag_i64_to_str(route_ms));
+    let m4: []u8 = _zag_str_concat(m3, " render_ms=");
+    let m5: []u8 = _zag_str_concat(m4, _zag_i64_to_str(render_ms));
+    let m6: []u8 = _zag_str_concat(m5, " total_ms=");
+    agent_ok1(_zag_str_concat(m6, _zag_i64_to_str(total_ms)));
+}
+
+fn agent_kinds() void {
+    agent_ok0();
+    let i: i32 = 0;
+    while (i < kind_count()) {
+        let k: Kind = kind_at(i);
+        let fp: Vox = kind_fp(k);
+        _zag_print("K ");
+        _zag_print(kind_slug(k));
+        _zag_print(" ");
+        _zag_print(kind_name(k));
+        _zag_print(" fp=");
+        agent_print_i("", fp.x as i64);
+        _zag_print("x");
+        agent_print_i("", fp.y as i64);
+        _zag_print("x");
+        agent_print_i("", fp.z as i64);
+        _zag_print(" ports=");
+        _zag_println(_zag_i64_to_str(kind_port_count(k) as i64));
+        i = i + 1;
+    }
+    agent_dot();
+}
+
+fn agent_list(a: *App) void {
+    let s: *Scene = a.*.scene;
+    agent_ok0();
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        let c: Comp = s.*.comps.data[i];
+        _zag_print("C ");
+        agent_print_i("", c.id as i64);
+        _zag_print(" ");
+        _zag_print(kind_slug(c.kind));
+        _zag_print(" ");
+        agent_print_i("", c.origin.x as i64);
+        _zag_print(" ");
+        agent_print_i("", c.origin.y as i64);
+        _zag_print(" ");
+        agent_print_i("", c.origin.z as i64);
+        _zag_print(" ");
+        agent_print_i("", c.rot as i64);
+        _zag_print(" ");
+        _zag_println(c.name_);
+        i = i + 1;
+    }
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        let g: Guide = s.*.guides.data[gi];
+        _zag_print("G ");
+        agent_print_i("", g.id as i64);
+        _zag_print(" ");
+        agent_print_i("", g.from_c as i64);
+        _zag_print(":");
+        agent_print_i("", g.from_p as i64);
+        _zag_print(" -> ");
+        agent_print_i("", g.to_c as i64);
+        _zag_print(":");
+        agent_print_i("", g.to_p as i64);
+        _zag_print(" hops=");
+        agent_print_i("", (g.path.len - 1) as i64);
+        _zag_print(" live=");
+        _zag_print(trit_glyph(g.live));
+        agent_print_guide_path(g);
+        _zag_println("");
+        gi = gi + 1;
+    }
+    agent_dot();
+}
+
+fn agent_get(a: *App, id: i64) void {
+    let ci: i32 = scene_comp_index(a.*.scene, id as i32);
+    if (ci < 0) {
+        agent_err("unknown component id");
+        return;
+    }
+    let c: Comp = a.*.scene.*.comps.data[ci];
+    let msg: []u8 = _zag_str_concat("id=", _zag_i64_to_str(c.id as i64));
+    let m2: []u8 = _zag_str_concat(msg, " kind=");
+    let m3: []u8 = _zag_str_concat(m2, kind_slug(c.kind));
+    let m4: []u8 = _zag_str_concat(m3, " name=");
+    let m5: []u8 = _zag_str_concat(m4, c.name_);
+    agent_ok1(m5);
+}
+
+fn agent_place(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
+    if (toks.*.len < 5) {
+        agent_err("usage: place <kind> <x> <y> <z> [rot]");
+        return;
+    }
+    let ki: i32 = parse_kind_name(tok_slice(line, list.get[Tok](toks, 1)));
+    if (ki < 0) {
+        agent_err("unknown kind (plate chamber soh emitter detector)");
+        return;
+    }
+    let x: i32 = tok_i64(line, list.get[Tok](toks, 2)) as i32;
+    let y: i32 = tok_i64(line, list.get[Tok](toks, 3)) as i32;
+    let z: i32 = tok_i64(line, list.get[Tok](toks, 4)) as i32;
+    let rot: i32 = 0;
+    if (toks.*.len >= 6) {
+        rot = tok_i64(line, list.get[Tok](toks, 5)) as i32;
+    }
+    let id: i32 = scene_place(a.*.scene, kind_at(ki), vox(x, y, z), rot);
+    if (id < 0) {
+        let code: i32 = scene_can_place(a.*.scene, kind_at(ki), vox(x, y, z), rot);
+        agent_err(place_err_text(code));
+        return;
+    }
+    op_add_comp(&a.*.jrn, a.*.scene, id);
+    session_after_edit(a);
+    let ci: i32 = scene_comp_index(a.*.scene, id);
+    let nm: []u8 = a.*.scene.*.comps.data[ci].name_;
+    _zag_print("OK id=");
+    _zag_print(_zag_i64_to_str(id as i64));
+    _zag_print(" name=");
+    _zag_println(nm);
+    agent_flush();
+}
+
+fn agent_route(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
+    if (toks.*.len < 5) {
+        agent_err("usage: route <from_comp> <from_port> <to_comp> <to_port>");
+        return;
+    }
+    let fc: i32 = tok_i64(line, list.get[Tok](toks, 1)) as i32;
+    let fp: i32 = tok_i64(line, list.get[Tok](toks, 2)) as i32;
+    let tc: i32 = tok_i64(line, list.get[Tok](toks, 3)) as i32;
+    let tp: i32 = tok_i64(line, list.get[Tok](toks, 4)) as i32;
+    let fi: i32 = scene_comp_index(a.*.scene, fc);
+    let ti: i32 = scene_comp_index(a.*.scene, tc);
+    if (fi < 0 || ti < 0) {
+        agent_err("unknown component in route");
+        return;
+    }
+    let src: Comp = a.*.scene.*.comps.data[fi];
+    let dst: Comp = a.*.scene.*.comps.data[ti];
+    let start: Vox = comp_port_attach(src, fp);
+    let goal: Vox = comp_port_attach(dst, tp);
+    let path: list.ArrayList[Vox] = list.make[Vox](32);
+    if (!route_guide(a.*.scene, start, goal, &path)) {
+        list.free[Vox](&path);
+        agent_err("no routable path");
+        return;
+    }
+    let gid: i32 = scene_add_guide(a.*.scene, fc, fp, tc, tp, path);
+    op_add_guide(&a.*.jrn, a.*.scene, gid);
+    session_after_edit(a);
+    _zag_print("OK id=");
+    _zag_println(_zag_i64_to_str(gid as i64));
+    agent_flush();
+}
+
+fn agent_sim_state(a: *App) void {
+    sim_recompile(a.*.sim, a.*.scene);
+    agent_ok0();
+    let i: i32 = 0;
+    while (i < a.*.scene.*.comps.len) {
+        let c: Comp = a.*.scene.*.comps.data[i];
+        if (c.kind == Kind.Emitter || c.kind == Kind.Chamber || c.kind == Kind.Detector) {
+            let t: i32 = sim_history(a.*.sim, c.id, 0);
+            _zag_print("S ");
+            _zag_print(c.name_);
+            _zag_print(" ");
+            _zag_println(trit_glyph(t));
+        }
+        i = i + 1;
+    }
+    let gi: i32 = 0;
+    while (gi < a.*.scene.*.guides.len) {
+        let g: Guide = a.*.scene.*.guides.data[gi];
+        _zag_print("W ");
+        agent_print_i("", g.id as i64);
+        _zag_print(" live=");
+        _zag_println(trit_glyph(g.live));
+        gi = gi + 1;
+    }
+    _zag_print("symbol ");
+    _zag_println(_zag_i64_to_str(a.*.sim.*.symbol));
+    agent_dot();
+}
+
+fn agent_render(a: *App, path: []u8) void {
+    app_frame(a, 0.0);
+    fb_write_bmp(&a.*.f, path);
+    let msg: []u8 = _zag_str_concat("wrote ", path);
+    agent_ok1(msg);
+}
+
+fn agent_test(cmd: []u8) void {
+    let rc: i32 = 0;
+    if (_zag_strcmp(cmd, "engine") == 1) {
+        rc = _zag_exec_cmd("./probe/engine_test >/dev/null 2>&1");
+    } else if (_zag_strcmp(cmd, "smoke") == 1) {
+        rc = _zag_exec_cmd("./zagpa --smoke /tmp/triton_smoke.bmp >/dev/null 2>&1");
+    } else if (_zag_strcmp(cmd, "build") == 1) {
+        rc = _zag_exec_cmd("./build.sh >/dev/null 2>&1");
+    } else {
+        agent_err("unknown test (engine smoke build)");
+        return;
+    }
+    if (rc == 0) {
+        agent_ok1("passed");
+    } else {
+        agent_err("test failed");
+    }
+}
+
+fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
+    if (toks.*.len == 0) { return; }
+    let verb: Tok = list.get[Tok](toks, 0);
+
+    if (tok_eq(line, verb, "ping")) { agent_ok1("pong"); return; }
+    if (tok_eq(line, verb, "help")) { agent_help(); return; }
+    if (tok_eq(line, verb, "quit") || tok_eq(line, verb, "exit")) {
+        agent_ok1("bye");
+        a.*.quit = true;
+        return;
+    }
+    if (tok_eq(line, verb, "new")) {
+        app_new_design(a);
+        session_after_edit(a);
+        agent_ok1("cleared");
+        return;
+    }
+    if (tok_eq(line, verb, "demo")) {
+        demo_load(a);
+        session_after_edit(a);
+        agent_ok1("demo loaded");
+        return;
+    }
+    if (tok_eq(line, verb, "view")) {
+        session_agent_view();
+        return;
+    }
+    if (tok_eq(line, verb, "pick")) {
+        let cell: Vox = session_agent_pick_cell();
+        if (cell.x < 0) {
+            agent_err("no pick (hover viewport in GUI or use place_here after view)");
+            return;
+        }
+        let msg: []u8 = _zag_str_concat("x=", _zag_i64_to_str(cell.x as i64));
+        let m2: []u8 = _zag_str_concat(msg, " y=");
+        let m3: []u8 = _zag_str_concat(m2, _zag_i64_to_str(cell.y as i64));
+        let m4: []u8 = _zag_str_concat(m3, " z=");
+        agent_ok1(_zag_str_concat(m4, _zag_i64_to_str(cell.z as i64)));
+        return;
+    }
+    if (tok_eq(line, verb, "place_here")) {
+        if (toks.*.len < 2) { agent_err("usage: place_here <kind> [rot]"); return; }
+        let ki: i32 = parse_kind_name(tok_slice(line, list.get[Tok](toks, 1)));
+        if (ki < 0) { agent_err("unknown kind"); return; }
+        let cell: Vox = session_agent_pick_cell();
+        if (cell.x < 0) { agent_err("no hover/ghost cell in live.bus"); return; }
+        let rot: i32 = session_agent_pick_rot();
+        if (toks.*.len >= 3) { rot = tok_i64(line, list.get[Tok](toks, 2)) as i32; }
+        let id: i32 = scene_place(a.*.scene, kind_at(ki), cell, rot);
+        if (id < 0) { agent_err(place_err_text(scene_can_place(a.*.scene, kind_at(ki), cell, rot))); return; }
+        op_add_comp(&a.*.jrn, a.*.scene, id);
+        session_after_edit(a);
+        let ci: i32 = scene_comp_index(a.*.scene, id);
+        let nm: []u8 = a.*.scene.*.comps.data[ci].name_;
+        _zag_print("OK id=");
+        _zag_print(_zag_i64_to_str(id as i64));
+        _zag_print(" name=");
+        _zag_println(nm);
+        agent_flush();
+        return;
+    }
+    if (tok_eq(line, verb, "place_on")) {
+        if (toks.*.len < 5) { agent_err("usage: place_on <kind> <plate_id> <lx> <lz> [rot]"); return; }
+        let ki: i32 = parse_kind_name(tok_slice(line, list.get[Tok](toks, 1)));
+        if (ki < 0) { agent_err("unknown kind"); return; }
+        let pid: i32 = tok_i64(line, list.get[Tok](toks, 2)) as i32;
+        let pci: i32 = scene_comp_index(a.*.scene, pid);
+        if (pci < 0) { agent_err("unknown plate id"); return; }
+        let plate: Comp = a.*.scene.*.comps.data[pci];
+        let lx: i32 = tok_i64(line, list.get[Tok](toks, 3)) as i32;
+        let lz: i32 = tok_i64(line, list.get[Tok](toks, 4)) as i32;
+        let rot: i32 = 0;
+        if (toks.*.len >= 6) { rot = tok_i64(line, list.get[Tok](toks, 5)) as i32; }
+        let origin: Vox = vox(plate.origin.x + lx, 1, plate.origin.z + lz);
+        let id: i32 = scene_place(a.*.scene, kind_at(ki), origin, rot);
+        if (id < 0) { agent_err(place_err_text(scene_can_place(a.*.scene, kind_at(ki), origin, rot))); return; }
+        op_add_comp(&a.*.jrn, a.*.scene, id);
+        session_after_edit(a);
+        let ci: i32 = scene_comp_index(a.*.scene, id);
+        _zag_print("OK id=");
+        _zag_print(_zag_i64_to_str(id as i64));
+        _zag_print(" name=");
+        _zag_println(a.*.scene.*.comps.data[ci].name_);
+        agent_flush();
+        return;
+    }
+    if (tok_eq(line, verb, "list")) {
+        agent_list(a);
+        return;
+    }
+    if (tok_eq(line, verb, "place")) {
+        agent_place(a, line, toks);
+        return;
+    }
+    if (tok_eq(line, verb, "route")) {
+        agent_route(a, line, toks);
+        return;
+    }
+    if (tok_eq(line, verb, "delete") || tok_eq(line, verb, "del")) {
+        if (toks.*.len < 2) { agent_err("usage: delete <id>"); return; }
+        let id: i32 = tok_i64(line, list.get[Tok](toks, 1)) as i32;
+        if (scene_comp_index(a.*.scene, id) < 0) {
+            agent_err("unknown component id");
+            return;
+        }
+        op_del_comp(&a.*.jrn, a.*.scene, id);
+        scene_remove(a.*.scene, id);
+        session_after_edit(a);
+        agent_ok1("deleted");
+        return;
+    }
+    if (tok_eq(line, verb, "undo")) {
+        if (journal_undo(&a.*.jrn, a.*.scene)) {
+            sel_prune(a);
+            sim_reset(a.*.sim, a.*.scene);
+            app_frame_all(a);
+            session_after_edit(a);
+            agent_ok1("undo");
+        } else {
+            agent_err("nothing to undo");
+        }
+        return;
+    }
+    if (tok_eq(line, verb, "redo")) {
+        if (journal_redo(&a.*.jrn, a.*.scene)) {
+            sel_prune(a);
+            sim_reset(a.*.sim, a.*.scene);
+            app_frame_all(a);
+            session_after_edit(a);
+            agent_ok1("redo");
+        } else {
+            agent_err("nothing to redo");
+        }
+        return;
+    }
+    if (tok_eq(line, verb, "get")) {
+        if (toks.*.len < 2) { agent_err("usage: get <id>"); return; }
+        agent_get(a, tok_i64(line, list.get[Tok](toks, 1)));
+        return;
+    }
+    if (tok_eq(line, verb, "select") || tok_eq(line, verb, "sel")) {
+        if (toks.*.len < 2) { agent_err("usage: select <id>"); return; }
+        sel_set(a, tok_i64(line, list.get[Tok](toks, 1)) as i32);
+        agent_ok1("selected");
+        return;
+    }
+    if (tok_eq(line, verb, "can_place")) {
+        if (toks.*.len < 5) { agent_err("usage: can_place <kind> <x> <y> <z> [rot]"); return; }
+        let ki: i32 = parse_kind_name(tok_slice(line, list.get[Tok](toks, 1)));
+        if (ki < 0) { agent_err("unknown kind"); return; }
+        let rot: i32 = 0;
+        if (toks.*.len >= 6) { rot = tok_i64(line, list.get[Tok](toks, 5)) as i32; }
+        let code: i32 = scene_can_place(a.*.scene, kind_at(ki),
+            vox(tok_i64(line, list.get[Tok](toks, 2)) as i32,
+                tok_i64(line, list.get[Tok](toks, 3)) as i32,
+                tok_i64(line, list.get[Tok](toks, 4)) as i32), rot);
+        if (code == 0) { agent_ok1("yes"); }
+        else { agent_err(place_err_text(code)); }
+        return;
+    }
+    if (tok_eq(line, verb, "save")) {
+        let path: []u8 = session_zpa_path();
+        if (toks.*.len >= 2) { path = tok_slice(line, list.get[Tok](toks, 1)); }
+        if (design_save(a.*.scene, path)) {
+            a.*.file_ = _zag_strdup(path);
+            a.*.dirty = false;
+            session_push(a);
+            agent_ok1("saved");
+        } else { agent_err("save failed"); }
+        return;
+    }
+    if (tok_eq(line, verb, "open")) {
+        let path: []u8 = session_zpa_path();
+        if (toks.*.len >= 2) { path = tok_slice(line, list.get[Tok](toks, 1)); }
+        if (design_load(a.*.scene, path)) {
+            if (_zag_strcmp(path, session_zpa_path()) == 1) {
+                session_sync_journal(a);
+            } else {
+                journal_clear(&a.*.jrn);
+            }
+            sel_clear(a);
+            a.*.file_ = _zag_strdup(path);
+            a.*.dirty = false;
+            app_frame_all(a);
+            session_push(a);
+            agent_ok1("opened");
+        } else { agent_err("open failed"); }
+        return;
+    }
+    if (tok_eq(line, verb, "list_files")) {
+        let files: list.ArrayList[[]u8] = list.make[[]u8](8);
+        list_designs(&files);
+        agent_ok0();
+        let i: i32 = 0;
+        while (i < files.len) {
+            _zag_print("F ");
+            _zag_println(list.get[[]u8](files, i));
+            i = i + 1;
+        }
+        agent_dot();
+        return;
+    }
+    if (tok_eq(line, verb, "render")) {
+        if (toks.*.len < 2) { agent_err("usage: render <out.bmp>"); return; }
+        agent_render(a, tok_slice(line, list.get[Tok](toks, 1)));
+        return;
+    }
+    if (tok_eq(line, verb, "sim")) {
+        if (toks.*.len < 2) { agent_err("usage: sim step|reset|state [n]"); return; }
+        let sub: Tok = list.get[Tok](toks, 1);
+        if (tok_eq(line, sub, "reset")) {
+            sim_reset(a.*.sim, a.*.scene);
+            agent_ok1("reset");
+            return;
+        }
+        if (tok_eq(line, sub, "state")) {
+            agent_sim_state(a);
+            return;
+        }
+        if (tok_eq(line, sub, "step")) {
+            let n: i32 = 1;
+            if (toks.*.len >= 3) { n = tok_i64(line, list.get[Tok](toks, 2)) as i32; }
+            if (n < 1) { n = 1; }
+            sim_recompile(a.*.sim, a.*.scene);
+            let i: i32 = 0;
+            while (i < n) {
+                sim_step(a.*.sim, a.*.scene);
+                i = i + 1;
+            }
+            let msg: []u8 = _zag_str_concat("symbol=", _zag_i64_to_str(a.*.sim.*.symbol));
+            agent_ok1(msg);
+            return;
+        }
+        agent_err("sim: use step, reset, or state");
+        return;
+    }
+    if (tok_eq(line, verb, "test")) {
+        if (toks.*.len < 2) { agent_err("usage: test engine|smoke|build"); return; }
+        agent_test(tok_slice(line, list.get[Tok](toks, 1)));
+        return;
+    }
+    if (tok_eq(line, verb, "build")) {
+        agent_test("build");
+        return;
+    }
+    if (tok_eq(line, verb, "status")) {
+        agent_status(a);
+        return;
+    }
+    if (tok_eq(line, verb, "coords")) {
+        agent_coords(a);
+        return;
+    }
+    if (tok_eq(line, verb, "power")) {
+        agent_power(a);
+        return;
+    }
+    if (tok_eq(line, verb, "perf")) {
+        agent_perf(a);
+        return;
+    }
+    if (tok_eq(line, verb, "kinds")) {
+        agent_kinds();
+        return;
+    }
+    agent_err("unknown command (try help)");
+}
+
+fn agent_load_i32_le(buf: []u8, off: i32) i32 {
+    let b0: i32 = buf[off] as i32;
+    let b1: i32 = buf[off + 1] as i32;
+    let b2: i32 = buf[off + 2] as i32;
+    let b3: i32 = buf[off + 3] as i32;
+    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+}
+
+// Run one agent command with stdout captured via pipe (for native MCP).
+fn agent_capture_line(a: *App, line: []u8) []u8 {
+    let fds: list.ArrayList[u8] = list.make[u8](8);
+    let zi: i32 = 0;
+    while (zi < 8) {
+        list.push[u8](&fds, 0);
+        zi = zi + 1;
+    }
+    let prc: i64 = _zag_raw_syscall(22, fds.data as i64, 0, 0, 0, 0, 0);
+    if (prc < 0) {
+        list.free[u8](&fds);
+        return "ERR capture pipe failed";
+    }
+    let rfd: i64 = agent_load_i32_le(fds.data[0..8], 0) as i64;
+    let wfd: i64 = agent_load_i32_le(fds.data[0..8], 4) as i64;
+    list.free[u8](&fds);
+
+    let saved: i64 = _zag_raw_syscall(32, 1, 0, 0, 0, 0, 0);
+    if (saved < 0) {
+        _zag_raw_syscall(3, rfd, 0, 0, 0, 0, 0);
+        return "ERR capture dup failed";
+    }
+    _zag_raw_syscall(33, wfd, 1, 0, 0, 0, 0);
+    _zag_raw_syscall(3, wfd, 0, 0, 0, 0, 0);
+
+    let toks: list.ArrayList[Tok] = list.make[Tok](16);
+    tokenize(line, &toks);
+    agent_dispatch(a, line, &toks);
+    list.free[Tok](&toks);
+    _zag_flush();
+
+    _zag_raw_syscall(33, saved, 1, 0, 0, 0, 0);
+    _zag_raw_syscall(3, saved, 0, 0, 0, 0, 0);
+
+    let out: list.ArrayList[u8] = list.make[u8](4096);
+    let chunk: list.ArrayList[u8] = list.make[u8](1024);
+    let running: bool = true;
+    while (running) {
+        let n: i64 = _zag_read_fd(rfd, chunk.data as *i8, chunk.cap as i64);
+        if (n <= 0) {
+            running = false;
+        } else {
+            let i: i32 = 0;
+            while (i < n as i32) {
+                list.push[u8](&out, chunk.data[i]);
+                i = i + 1;
+            }
+        }
+    }
+    _zag_raw_syscall(3, rfd, 0, 0, 0, 0, 0);
+    list.free[u8](&chunk);
+
+    while (out.len > 0 && (out.data[out.len - 1] as i32) == 10) {
+        out.len = out.len - 1;
+    }
+    let text: []u8 = out.data[0..out.len];
+    list.free[u8](&out);
+    return text;
+}
+
+fn agent_run_line(a: *App, line: []u8) void {
+    session_pull(a);
+    let toks: list.ArrayList[Tok] = list.make[Tok](16);
+    tokenize(line, &toks);
+    agent_dispatch(a, line, &toks);
+    list.free[Tok](&toks);
+}
+
+fn agent_run_script(a: *App, path: []u8) void {
+    let raw: []u8 = _zag_read_file(path);
+    if (raw.len <= 0) {
+        agent_err("cannot read script");
+        return;
+    }
+    let pos: i32 = 0;
+    while (pos < raw.len && !a.*.quit) {
+        let eol: i32 = pos;
+        while (eol < raw.len && (raw[eol] as i32) != 10) { eol = eol + 1; }
+        let line: []u8 = raw[pos..eol];
+        pos = eol + 1;
+        if (line.len > 0 && (line[0] as i32) != '#') {
+            agent_run_line(a, line);
+        }
+    }
+}
+
+// --agent [script.tcmd]  or  --agent --once "cmd"
+fn run_agent(script: []u8, once: []u8) i32 {
+    let a: *App = app_new(800, 600);
+    session_bind(a);
+    _zag_println("OK ready triton-agent-1");
+    agent_flush();
+
+    if (once.len > 0) {
+        agent_run_line(a, once);
+        if (a.*.quit) { return 0; }
+        return 0;
+    }
+    if (script.len > 0) {
+        agent_run_script(a, script);
+        return 0;
+    }
+
+    let io: IoBuf = iobuf_new();
+    let line: list.ArrayList[u8] = list.make[u8](256);
+    let running: bool = true;
+    while (running && !io.eof && !a.*.quit) {
+        if (!ioline_read(&io, 0, &line)) {
+            if (io.eof) { running = false; }
+        } else if (line.len > 0) {
+            agent_run_line(a, line.data[0..line.len]);
+        }
+    }
+    list.free[u8](&line);
+    iobuf_free(&io);
+    return 0;
+}

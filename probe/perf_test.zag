@@ -1,0 +1,51 @@
+// perf_test.zag — quick subsystem timing for lag investigation.
+@import("../src/workspace.zag")
+@import("../src/x11.zag")
+
+fn bench_frames(a: *App, n: i32) i64 {
+    let t0: i64 = _zag_clock_monotonic_ms();
+    let i: i32 = 0;
+    while (i < n) {
+        app_frame(a, 0.016);
+        i = i + 1;
+    }
+    return (_zag_clock_monotonic_ms() - t0) / (n as i64);
+}
+
+fn bench_x11_blit(n: i32) i64 {
+    let x: *X11 = x11_connect(1440, 900, "perf");
+    if (!x.*.ok) {
+        _zag_println("perf: no X display");
+        return 0 - 1;
+    }
+    let a: *App = app_new(1440, 900);
+    app_action_demo(a);
+    sel_set(a, 4);
+    app_frame(a, 0.016);
+    let t0: i64 = _zag_clock_monotonic_ms();
+    let i: i32 = 0;
+    while (i < n) {
+        x11_put_frame(x, a.*.f.px.data, a.*.f.w, a.*.f.h);
+        i = i + 1;
+    }
+    let ms: i64 = (_zag_clock_monotonic_ms() - t0) / (n as i64);
+    x11_close(x);
+    return ms;
+}
+
+fn main() i32 {
+    let a: *App = app_new(1440, 900);
+    app_action_demo(a);
+
+    _zag_print("perf: frame_ms no_sel avg=");
+    print_i64(bench_frames(a, 8));
+
+    sel_set(a, 4);
+    _zag_print(" perf: frame_ms chamber_sel avg=");
+    print_i64(bench_frames(a, 8));
+
+    sel_clear(a);
+    _zag_print(" perf: x11_blit_ms avg=");
+    print_i64(bench_x11_blit(5));
+    return 0;
+}

@@ -1,0 +1,55 @@
+@import("../std/list.zag") as list
+@import("../src/scene.zag")
+
+fn pr(label: []u8, v: i64) void {
+    _zag_print(label);
+    _zag_print("=");
+    _zag_println(_zag_i64_to_str(v));
+}
+
+fn main() i32 {
+    let s: *Scene = scene_new();
+    let p: i32 = scene_place(s, Kind.Plate, vox(0, 0, 0), 0);
+    let _r1: i32 = scene_resize(s, p, vox(8, 4, 8));
+    let _ch: i32 = scene_place(s, Kind.Chamber, vox(2, 4, 2), 0);
+
+    let ci: i32 = scene_comp_index(s, p);
+    let c: Comp = s.*.comps.data[ci];
+    let sz: Vox = clamp_size(c.kind, vox(8, 1, 8));
+
+    let old_cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_comp(c, &old_cells);
+    let i: i32 = 0;
+    while (i < old_cells.len) {
+        hm_del_cell(s, old_cells.data[i]);
+        i = i + 1;
+    }
+    pr("after_del_232", scene_cell_owner(s, vox(2, 3, 2)) as i64);
+
+    let new_cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_ext(sz, c.origin, c.rot, &new_cells);
+    pr("new_len", new_cells.len as i64);
+    let maxy: i32 = 0;
+    let k: i32 = 0;
+    while (k < new_cells.len) {
+        if (new_cells.data[k].y > maxy) { maxy = new_cells.data[k].y; }
+        k = k + 1;
+    }
+    pr("new_maxy", maxy as i64);
+    // put one by one, watch (2,3,2)
+    let j: i32 = 0;
+    while (j < new_cells.len) {
+        hm_put_cell(s, new_cells.data[j], p);
+        let own: i32 = scene_cell_owner(s, vox(2, 3, 2));
+        if (own >= 0) {
+            pr("became_owned_at_j", j as i64);
+            pr("cell_x", new_cells.data[j].x as i64);
+            pr("cell_y", new_cells.data[j].y as i64);
+            pr("cell_z", new_cells.data[j].z as i64);
+            j = new_cells.len;
+        }
+        j = j + 1;
+    }
+    pr("final_232", scene_cell_owner(s, vox(2, 3, 2)) as i64);
+    return 0;
+}

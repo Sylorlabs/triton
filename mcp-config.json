@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "triton": {
+      "command": "/home/micah/Desktop/Sylorlabs/triton/zagpa",
+      "args": ["--mcp"],
+      "env": { "TRITON_SESSION": "/home/micah/Desktop/Sylorlabs/triton/.triton/live.zpa" },
+      "cwd": "/home/micah/Desktop/Sylorlabs/triton"
+    }
+  }
+}

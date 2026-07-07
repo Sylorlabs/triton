@@ -1,0 +1,40 @@
+// x11_pixel_pack_test.zag — verify 32-bit ZPixmap packing used by x11_put_frame.
+
+@import("../std/list.zag") as list
+
+fn check(name_: []u8, ok: bool, fails: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); fails.* = fails.* + 1; }
+    _zag_println(name_);
+}
+
+fn pack_px(px: *i64, i: i32) i32 {
+    return (px[i] as i32) & 16777215;
+}
+
+fn main() i32 {
+    let fails: i32 = 0;
+    let px: list.ArrayList[i64] = list.make[i64](4);
+    list.push[i64](&px, 255);
+    list.push[i64](&px, 65280);
+    list.push[i64](&px, 16711680);
+
+    let w0: i32 = pack_px(px.data, 0);
+    let w1: i32 = pack_px(px.data, 1);
+    let word: i64 = (w1 as i64) << 32;
+    word = word | (w0 as i64);
+
+    check("two pixels occupy one physical word", (word as i64) == ((65280 as i64) << 32) | 255, &fails);
+
+    let w2: i32 = pack_px(px.data, 2);
+    let word2: i64 = (w2 as i64) << 32;
+    word2 = word2 | (w1 as i64);
+    check("next pair remains tightly packed", (word2 as i64) == ((16711680 as i64) << 32) | 65280, &fails);
+
+    let odd: i64 = (pack_px(px.data, 2) as i64);
+    check("odd final pixel has zero upper half", (odd >> 32) == 0, &fails);
+
+    list.free[i64](&px);
+    if (fails == 0) { _zag_println("X11 PIXEL PACK: ALL PASS"); return 0; }
+    _zag_println("X11 PIXEL PACK: FAILURES");
+    return 1;
+}

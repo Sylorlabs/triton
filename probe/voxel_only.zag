@@ -1,0 +1,6 @@
+@import("../src/voxel.zag")
+
+fn main() i32 {
+    let v: Vox = vox(1, 2, 3);
+    return v.x;
+}

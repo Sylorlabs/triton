@@ -1,0 +1,35 @@
+// probe3.zag — framebuffer-to-file blit path: cast *i32 -> *i8 -> []u8 slice,
+// then time a full-size /dev/shm write.
+
+@import("../std/list.zag") as list
+
+fn main() i32 {
+    let w: i32 = 1120;
+    let h: i32 = 730;
+    let n: i32 = w * h;
+    let fb: list.ArrayList[i32] = list.make[i32](n);
+
+    let i: i32 = 0;
+    while (i < n) {
+        fb.data[i] = (i & 255) * 65536 + 128;
+        i = i + 1;
+    }
+
+    // pointer cast + slice
+    let raw: *i8 = fb.data as *i8;
+    let bytes: []u8 = raw[0..n * 4];
+    print_i32(bytes.len);          // 3270400
+    print_i32(bytes[4] as i32);    // low byte of fb[1] = 128
+
+    let t0: i64 = _zag_clock_monotonic_ms();
+    let f: i32 = 0;
+    while (f < 30) {
+        let rc: i32 = _zag_write_file("/dev/shm/zagpa_fb.bin", bytes);
+        if (rc != 0) { print_i32(0 - 999); }
+        f = f + 1;
+    }
+    let t1: i64 = _zag_clock_monotonic_ms();
+    print_i64(t1 - t0);   // ms for 30 writes of 3.2MB
+
+    return 0;
+}

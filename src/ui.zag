@@ -1,0 +1,164 @@
+// ui.zag — dark workbench theme + minimal immediate-mode widgets over fb.zag.
+
+@import("../std/list.zag") as list
+@import("fb.zag")
+
+// ── theme ─────────────────────────────────────────────────────────────────────
+
+fn th_bg() i64 { return rgb(24, 24, 27); }
+fn th_panel() i64 { return rgb(35, 35, 39); }
+fn th_panel_alt() i64 { return rgb(43, 43, 48); }
+fn th_header() i64 { return rgb(48, 48, 54); }
+fn th_outline() i64 { return rgb(14, 14, 16); }
+fn th_text() i64 { return rgb(205, 205, 210); }
+fn th_text_dim() i64 { return rgb(128, 128, 138); }
+fn th_accent() i64 { return rgb(71, 114, 179); }     // workbench blue
+fn th_accent_hot() i64 { return rgb(96, 142, 210); }
+fn th_select() i64 { return rgb(255, 168, 40); }     // selection orange
+fn th_danger() i64 { return rgb(200, 70, 70); }
+fn th_ok() i64 { return rgb(90, 200, 120); }
+fn th_vp_bg() i64 { return rgb(16, 16, 20); }
+
+// ── geometry ──────────────────────────────────────────────────────────────────
+
+struct Rect {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+}
+
+fn rect(x: i32, y: i32, w: i32, h: i32) Rect {
+    return Rect{ .x = x, .y = y, .w = w, .h = h };
+}
+
+fn rect_has(r: Rect, px: i32, py: i32) bool {
+    return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
+}
+
+// ── per-frame input state ─────────────────────────────────────────────────────
+// capture: which subsystem owns pointer drags this frame
+// 0 none / 1 splitter / 2 camera / 3 widget-drag (slider, scrub) / 4 palette drag
+
+struct Input {
+    mx: i32,
+    my: i32,
+    btn: i32,        // bit0 L, bit1 M, bit2 R
+    prev_btn: i32,
+    wheel: i32,
+    mods: i32,       // bit0 shift, bit1 ctrl, bit2 alt
+    keys: list.ArrayList[i32],
+    w: i32,
+    h: i32,
+    capture: i32,
+    quit: bool,
+}
+
+fn input_new() Input {
+    return Input{
+        .mx = 0, .my = 0, .btn = 0, .prev_btn = 0, .wheel = 0, .mods = 0,
+        .keys = list.make[i32](8),
+        .w = 1440, .h = 900,
+        .capture = 0,
+        .quit = false,
+    };
+}
+
+fn btn_down(in: *Input, bit: i32) bool {
+    return ((in.*.btn >> bit) & 1) == 1;
+}
+
+fn btn_was_down(in: *Input, bit: i32) bool {
+    return ((in.*.prev_btn >> bit) & 1) == 1;
+}
+
+fn btn_pressed(in: *Input, bit: i32) bool {
+    return btn_down(in, bit) && !btn_was_down(in, bit);
+}
+
+fn btn_released(in: *Input, bit: i32) bool {
+    return !btn_down(in, bit) && btn_was_down(in, bit);
+}
+
+fn shift_down(in: *Input) bool { return (in.*.mods & 1) == 1; }
+
+fn key_hit(in: *Input, code: i32) bool {
+    let i: i32 = 0;
+    while (i < in.*.keys.len) {
+        if (list.get[i32](in.*.keys, i) == code) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn hover(in: *Input, r: Rect) bool {
+    if (in.*.capture != 0) { return false; }
+    return rect_has(r, in.*.mx, in.*.my);
+}
+
+// ── widgets ───────────────────────────────────────────────────────────────────
+
+// Panel background with a 24px title strip; returns the content rect.
+fn ui_panel(f: *FB, r: Rect, title: []u8) Rect {
+    fill_rect(f, r.x, r.y, r.w, r.h, th_panel());
+    rect_outline(f, r.x, r.y, r.w, r.h, th_outline());
+    fill_rect(f, r.x + 1, r.y + 1, r.w - 2, 22, th_header());
+    draw_text(f, r.x + 9, r.y + 8, title, th_text());
+    return rect(r.x + 1, r.y + 23, r.w - 2, r.h - 24);
+}
+
+fn ui_button(f: *FB, in: *Input, r: Rect, label: []u8, active: bool) bool {
+    let h: bool = hover(in, r);
+    let col: i64 = th_panel_alt();
+    if (active) { col = th_accent(); }
+    if (h) {
+        if (btn_down(in, 0)) { col = th_accent_hot(); }
+        else if (active) { col = th_accent_hot(); }
+        else { col = th_header(); }
+    }
+    fill_rect(f, r.x, r.y, r.w, r.h, col);
+    rect_outline(f, r.x, r.y, r.w, r.h, th_outline());
+    let tw: i32 = text_w(label);
+    let tcol: i64 = th_text();
+    if (active) { tcol = rgb(240, 244, 250); }
+    draw_text(f, r.x + (r.w - tw) / 2, r.y + (r.h - 7) / 2, label, tcol);
+    return h && btn_released(in, 0);
+}
+
+// Small icon-ish button (fixed label, e.g. "x" / ">" / "o").
+fn ui_mini(f: *FB, in: *Input, r: Rect, label: []u8, tint: i64) bool {
+    let h: bool = hover(in, r);
+    if (h) { fill_rect(f, r.x, r.y, r.w, r.h, th_header()); }
+    draw_text(f, r.x + (r.w - text_w(label)) / 2, r.y + (r.h - 7) / 2, label, tint);
+    return h && btn_released(in, 0);
+}
+
+// Horizontal slider; `dragging` persists across frames (0/1 flag in App).
+// Returns the updated value.
+fn ui_slider(f: *FB, in: *Input, r: Rect, value: f64, min_v: f64, max_v: f64, dragging: *i32) f64 {
+    fill_rect(f, r.x, r.y, r.w, r.h, th_panel_alt());
+    rect_outline(f, r.x, r.y, r.w, r.h, th_outline());
+    let frac: f64 = (value - min_v) / (max_v - min_v);
+    if (frac < 0.0) { frac = 0.0; }
+    if (frac > 1.0) { frac = 1.0; }
+    let fillw: i32 = ((r.w as f64) * frac) as i32;
+    fill_rect(f, r.x, r.y, fillw, r.h, th_accent());
+
+    if (hover(in, r) && btn_pressed(in, 0)) {
+        dragging.* = 1;
+        in.*.capture = 3;
+    }
+    if (dragging.* == 1) {
+        in.*.capture = 3;
+        if (!btn_down(in, 0)) {
+            dragging.* = 0;
+            in.*.capture = 0;
+        } else {
+            let t: f64 = ((in.*.mx - r.x) as f64) / (r.w as f64);
+            if (t < 0.0) { t = 0.0; }
+            if (t > 1.0) { t = 1.0; }
+            return min_v + t * (max_v - min_v);
+        }
+    }
+    return value;
+}

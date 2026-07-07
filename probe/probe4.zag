@@ -1,0 +1,25 @@
+// probe4.zag — determine *i32 indexing stride and byte layout.
+
+@import("../std/list.zag") as list
+
+fn main() i32 {
+    print_i32(@sizeOf[i32]());   // ?
+    print_i32(@sizeOf[u8]());    // ?
+    print_i32(@sizeOf[i64]());   // 8
+    print_i32(@sizeOf[f64]());   // 8
+
+    let fb: list.ArrayList[i32] = list.make[i32](4);
+    list.push[i32](&fb, 257);          // 0x101
+    list.push[i32](&fb, 16909060);     // 0x01020304
+    list.push[i32](&fb, 255);
+    list.push[i32](&fb, 1);
+
+    let raw: *i8 = fb.data as *i8;
+    let bytes: []u8 = raw[0..32];
+    let i: i32 = 0;
+    while (i < 16) {
+        print_i32(bytes[i] as i32);
+        i = i + 1;
+    }
+    return 0;
+}

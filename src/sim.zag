@@ -1,0 +1,305 @@
+// sim.zag — wave-state simulation. The scene's directed optical graph is
+// compiled into a synchronous dataflow model clocked at the 110 GHz symbol
+// rate. Trits ride guides as carrier phase; execution chambers interfere
+// their inputs (balanced saturating sum), SOH matrix tiles add cavity
+// memory (the chamber becomes a saturating ternary integrator), and MoS2
+// detectors discriminate phase back into trits.
+
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("voxel.zag")
+@import("components.zag")
+@import("scene.zag")
+@import("ternary.zag")
+
+fn carrier_ghz() f64 { return 110.0; }
+fn symbol_period_ps() f64 { return 1000.0 / carrier_ghz(); }   // 9.09 ps
+// Group velocity in the GeSn-clad guide (n_g ~ 2.1), nm per ps.
+fn group_velocity_nm_ps() f64 { return 299792.458 / 2.1; }
+fn hist_len() i32 { return 192; }
+
+// Retimed synchronous fabric: every guide hop is at least one symbol of
+// latency; each 4 lattice cells of physical run add one more symbol of skew.
+fn guide_delay_symbols(path_len: i32) i32 {
+    let steps: i32 = path_len - 1;
+    if (steps < 0) { steps = 0; }
+    let d: i32 = steps / 4;
+    if (d < 1) { d = 1; }
+    if (d > 64) { d = 64; }
+    return d;
+}
+
+// True physical propagation delay (femtoseconds) — shown in the inspector.
+fn guide_delay_fs(length_nm: f64) f64 {
+    return length_nm / group_velocity_nm_ps() * 1000.0;
+}
+
+// Emitter symbol pattern presets: 16-trit streams encoded as strings.
+fn preset_pattern(preset: i32) []u8 {
+    let p: i32 = preset % 4;
+    if (p < 0) { p = p + 4; }
+    if (p == 1) { return "++--++--0+0-++--"; }
+    if (p == 2) { return "-+-+00+-+-+-0+0-"; }
+    if (p == 3) { return "+00+-00-++0--0+0"; }
+    return "+0-++-0+--+0+-0-";
+}
+
+fn preset_trit(preset: i32, sym: i64) i32 {
+    let pat: []u8 = preset_pattern(preset);
+    let idx: i32 = (sym % (pat.len as i64)) as i32;
+    let ch: i32 = pat[idx] as i32;
+    if (ch == '+') { return 1; }
+    if (ch == '-') { return 0 - 1; }
+    return 0;
+}
+
+struct SNode {
+    comp_id: i32,
+    kind: Kind,
+    soh: i32,        // adjacent SOH tiles (chamber memory depth)
+    input_sum: i32,  // summed field arriving this symbol
+    out_t: i32,      // output trit this symbol
+    prev_t: i32,     // previous output (cavity feedback)
+    hist: list.ArrayList[i32],   // ring of last hist_len() output trits
+}
+
+struct SGuide {
+    guide_id: i32,
+    from_c: i32,
+    to_c: i32,
+    delay: i32,
+    ring: list.ArrayList[i32],   // delay-line ring buffer
+    head: i32,
+    arrived: i32,                // trit delivered to the sink this symbol
+}
+
+struct Sim {
+    nodes: list.ArrayList[SNode],
+    sguides: list.ArrayList[SGuide],
+    nidx: hm.IntMap[i32],        // comp id -> node index
+    symbol: i64,
+    playing: bool,
+    speed: f64,                  // symbols per second of wall time
+    accum: f64,
+}
+
+fn sim_new() *Sim {
+    return new(Sim{
+        .nodes = list.make[SNode](16),
+        .sguides = list.make[SGuide](16),
+        .nidx = hm.int_make[i32](64),
+        .symbol = 0,
+        .playing = false,
+        .speed = 12.0,
+        .accum = 0.0,
+    });
+}
+
+fn sim_node_index(sim: *Sim, comp_id: i32) i32 {
+    return hm.int_get[i32](sim.*.nidx, comp_id) orelse (0 - 1);
+}
+
+// Rebuild the dataflow model from the scene. Resets time.
+fn sim_recompile(sim: *Sim, s: *Scene) void {
+    let i: i32 = 0;
+    while (i < sim.*.nodes.len) {
+        list.free[i32](&sim.*.nodes.data[i].hist);
+        i = i + 1;
+    }
+    let gi0: i32 = 0;
+    while (gi0 < sim.*.sguides.len) {
+        list.free[i32](&sim.*.sguides.data[gi0].ring);
+        gi0 = gi0 + 1;
+    }
+    sim.*.nodes.len = 0;
+    sim.*.sguides.len = 0;
+    hm.int_free[i32](&sim.*.nidx);
+    sim.*.nidx = hm.int_make[i32](64);
+    sim.*.symbol = 0;
+    sim.*.accum = 0.0;
+
+    let ci: i32 = 0;
+    while (ci < s.*.comps.len) {
+        let c: Comp = s.*.comps.data[ci];
+        let n: SNode = SNode{
+            .comp_id = c.id,
+            .kind = c.kind,
+            .soh = 0,
+            .input_sum = 0,
+            .out_t = 0,
+            .prev_t = 0,
+            .hist = list.make[i32](hist_len()),
+        };
+        if (c.kind == Kind.Chamber) { n.soh = scene_soh_adjacent(s, c.id); }
+        let hi: i32 = 0;
+        while (hi < hist_len()) {
+            list.push[i32](&n.hist, 0);
+            hi = hi + 1;
+        }
+        hm.int_put[i32](&sim.*.nidx, c.id, sim.*.nodes.len);
+        list.push[SNode](&sim.*.nodes, n);
+        ci = ci + 1;
+    }
+
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        let g: Guide = s.*.guides.data[gi];
+        let delay: i32 = guide_delay_symbols(g.path.len);
+        let sg: SGuide = SGuide{
+            .guide_id = g.id,
+            .from_c = g.from_c,
+            .to_c = g.to_c,
+            .delay = delay,
+            .ring = list.make[i32](delay),
+            .head = 0,
+            .arrived = 0,
+        };
+        let ri: i32 = 0;
+        while (ri < delay) {
+            list.push[i32](&sg.ring, 0);
+            ri = ri + 1;
+        }
+        list.push[SGuide](&sim.*.sguides, sg);
+        s.*.guides.data[gi].live = 0;
+        gi = gi + 1;
+    }
+    s.*.topo_dirty = false;
+}
+
+fn sim_reset(sim: *Sim, s: *Scene) void {
+    sim.*.symbol = 0;
+    sim.*.accum = 0.0;
+    let i: i32 = 0;
+    while (i < sim.*.nodes.len) {
+        let n: *SNode = &sim.*.nodes.data[i];
+        n.*.input_sum = 0;
+        n.*.out_t = 0;
+        n.*.prev_t = 0;
+        let hi: i32 = 0;
+        while (hi < hist_len()) {
+            list.set[i32](&n.*.hist, hi, 0);
+            hi = hi + 1;
+        }
+        i = i + 1;
+    }
+    let gi: i32 = 0;
+    while (gi < sim.*.sguides.len) {
+        let g: *SGuide = &sim.*.sguides.data[gi];
+        g.*.head = 0;
+        g.*.arrived = 0;
+        let ri: i32 = 0;
+        while (ri < g.*.delay) {
+            list.set[i32](&g.*.ring, ri, 0);
+            ri = ri + 1;
+        }
+        gi = gi + 1;
+    }
+    let sgi: i32 = 0;
+    while (sgi < s.*.guides.len) {
+        s.*.guides.data[sgi].live = 0;
+        sgi = sgi + 1;
+    }
+}
+
+// Advance the fabric by one 9.09 ps symbol.
+fn sim_step(sim: *Sim, s: *Scene) void {
+    // Phase A: deliver the trit arriving at each guide's sink.
+    let i: i32 = 0;
+    while (i < sim.*.nodes.len) {
+        sim.*.nodes.data[i].input_sum = 0;
+        i = i + 1;
+    }
+    let gi: i32 = 0;
+    while (gi < sim.*.sguides.len) {
+        let g: *SGuide = &sim.*.sguides.data[gi];
+        let slot: i32 = g.*.head % g.*.delay;
+        let arrived: i32 = list.get[i32](g.*.ring, slot);
+        g.*.arrived = arrived;
+        let ni: i32 = sim_node_index(sim, g.*.to_c);
+        if (ni >= 0) {
+            sim.*.nodes.data[ni].input_sum = sim.*.nodes.data[ni].input_sum + arrived;
+        }
+        gi = gi + 1;
+    }
+
+    // Phase B: node transfer functions + history.
+    let hist_pos: i32 = (sim.*.symbol % (hist_len() as i64)) as i32;
+    let ni2: i32 = 0;
+    while (ni2 < sim.*.nodes.len) {
+        let n: *SNode = &sim.*.nodes.data[ni2];
+        if (n.*.kind == Kind.Emitter) {
+            let ci: i32 = scene_comp_index(s, n.*.comp_id);
+            if (ci >= 0) {
+                n.*.out_t = preset_trit(s.*.comps.data[ci].preset, sim.*.symbol);
+            }
+        }
+        if (n.*.kind == Kind.Chamber) {
+            let sum: i32 = n.*.input_sum;
+            // SOH tiles feed the previous field back into the cavity.
+            if (n.*.soh > 0) { sum = sum + n.*.prev_t * n.*.soh; }
+            n.*.prev_t = n.*.out_t;
+            n.*.out_t = trit_from_sum(sum);
+        }
+        if (n.*.kind == Kind.Detector) {
+            n.*.out_t = trit_from_sum(n.*.input_sum);
+        }
+        list.set[i32](&n.*.hist, hist_pos, n.*.out_t);
+        ni2 = ni2 + 1;
+    }
+
+    // Phase C: launch each source's fresh output into its guides.
+    let gi2: i32 = 0;
+    while (gi2 < sim.*.sguides.len) {
+        let g: *SGuide = &sim.*.sguides.data[gi2];
+        let src: i32 = sim_node_index(sim, g.*.from_c);
+        let launched: i32 = 0;
+        if (src >= 0) { launched = sim.*.nodes.data[src].out_t; }
+        let slot: i32 = g.*.head % g.*.delay;
+        list.set[i32](&g.*.ring, slot, launched);
+        g.*.head = g.*.head + 1;
+        gi2 = gi2 + 1;
+    }
+
+    // Mirror in-flight state onto scene guides for viewport coloring.
+    let sgi: i32 = 0;
+    while (sgi < s.*.guides.len) {
+        let gidx: i32 = 0 - 1;
+        let k: i32 = 0;
+        while (k < sim.*.sguides.len) {
+            if (sim.*.sguides.data[k].guide_id == s.*.guides.data[sgi].id) { gidx = k; }
+            k = k + 1;
+        }
+        if (gidx >= 0) {
+            s.*.guides.data[sgi].live = sim.*.sguides.data[gidx].arrived;
+        }
+        sgi = sgi + 1;
+    }
+
+    sim.*.symbol = sim.*.symbol + 1;
+}
+
+// Output trit of a component `back` symbols ago (0 = latest).
+fn sim_history(sim: *Sim, comp_id: i32, back: i32) i32 {
+    let ni: i32 = sim_node_index(sim, comp_id);
+    if (ni < 0) { return 0; }
+    if ((back as i64) >= sim.*.symbol) { return 0; }
+    if (back >= hist_len()) { return 0; }
+    let last: i64 = sim.*.symbol - 1 - (back as i64);
+    let pos: i32 = (last % (hist_len() as i64)) as i32;
+    return list.get[i32](sim.*.nodes.data[ni].hist, pos);
+}
+
+// Called every frame: recompiles on topology change, advances when playing.
+// Returns the number of symbols stepped.
+fn sim_update(sim: *Sim, s: *Scene, dt: f64) i32 {
+    if (s.*.topo_dirty) { sim_recompile(sim, s); }
+    if (!sim.*.playing) { return 0; }
+    sim.*.accum = sim.*.accum + dt * sim.*.speed;
+    let stepped: i32 = 0;
+    while (sim.*.accum >= 1.0 && stepped < 4096) {
+        sim.*.accum = sim.*.accum - 1.0;
+        sim_step(sim, s);
+        stepped = stepped + 1;
+    }
+    return stepped;
+}

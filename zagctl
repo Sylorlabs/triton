@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# zagctl — thin launcher for native zagpa agent/MCP (no Python).
+set -e
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+ZAGPA="$ROOT/zagpa"
+if [ ! -x "$ZAGPA" ]; then
+    echo "zagctl: zagpa not found — run ./build.sh" >&2
+    exit 1
+fi
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+    repl)
+        exec "$ZAGPA" --agent
+        ;;
+    mcp)
+        exec "$ZAGPA" --mcp
+        ;;
+    run)
+        exec "$ZAGPA" --agent "$1"
+        ;;
+    do)
+        shift || true
+        printf '%s\n' "$@" | "$ZAGPA" --agent
+        ;;
+    cmd)
+        exec "$ZAGPA" --agent --once "$*"
+        ;;
+    ping|help|demo|new|list|list_files|status|coords|power|perf|kinds|build)
+        exec "$ZAGPA" --agent --once "$cmd $*"
+        ;;
+    place)
+        exec "$ZAGPA" --agent --once "place $1 $2 $3 $4 ${5:-0}"
+        ;;
+    route)
+        exec "$ZAGPA" --agent --once "route $1 $2 $3 $4"
+        ;;
+    delete|del)
+        exec "$ZAGPA" --agent --once "delete $1"
+        ;;
+    open)
+        exec "$ZAGPA" --agent --once "open $1"
+        ;;
+    save)
+        exec "$ZAGPA" --agent --once "save $1"
+        ;;
+    render)
+        exec "$ZAGPA" --agent --once "render $1"
+        ;;
+    sim)
+        if [ "$1" = "step" ]; then
+            exec "$ZAGPA" --agent --once "sim step ${2:-1}"
+        fi
+        exec "$ZAGPA" --agent --once "sim $1"
+        ;;
+    test)
+        exec "$ZAGPA" --agent --once "test $1"
+        ;;
+    *)
+        exec "$ZAGPA" --agent --once "$cmd $*"
+        ;;
+esac

@@ -1,0 +1,6 @@
+@import("../src/scene.zag")
+
+fn main() i32 {
+    let s: *Scene = scene_new();
+    return 0;
+}

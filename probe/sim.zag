@@ -1,0 +1,101 @@
+// sim.zag — wave-state simulation. The scene's directed optical graph is
+// compiled into a synchronous dataflow model clocked at the 110 GHz symbol
+// rate. Trits ride guides as carrier phase; execution chambers interfere
+// their inputs (balanced saturating sum), SOH matrix tiles add cavity
+// memory (the chamber becomes a saturating ternary integrator), and MoS2
+// detectors discriminate phase back into trits.
+
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("voxel.zag")
+@import("components.zag")
+@import("scene.zag")
+@import("ternary.zag")
+
+fn carrier_ghz() f64 { return 110.0; }
+fn symbol_period_ps() f64 { return 1000.0 / carrier_ghz(); }   // 9.09 ps
+// Group velocity in the GeSn-clad guide (n_g ~ 2.1), nm per ps.
+fn group_velocity_nm_ps() f64 { return 299792.458 / 2.1; }
+fn hist_len() i32 { return 192; }
+
+// Retimed synchronous fabric: every guide hop is at least one symbol of
+// latency; each 4 lattice cells of physical run add one more symbol of skew.
+fn guide_delay_symbols(path_len: i32) i32 {
+    let steps: i32 = path_len - 1;
+    if (steps < 0) { steps = 0; }
+    let d: i32 = steps / 4;
+    if (d < 1) { d = 1; }
+    if (d > 64) { d = 64; }
+    return d;
+}
+
+// True physical propagation delay (femtoseconds) — shown in the inspector.
+fn guide_delay_fs(length_nm: f64) f64 {
+    return length_nm / group_velocity_nm_ps() * 1000.0;
+}
+
+// Emitter symbol pattern presets: 16-trit streams encoded as strings.
+fn preset_pattern(preset: i32) []u8 {
+    let p: i32 = preset % 4;
+    if (p < 0) { p = p + 4; }
+    if (p == 1) { return "++--++--0+0-++--"; }
+    if (p == 2) { return "-+-+00+-+-+-0+0-"; }
+    if (p == 3) { return "+00+-00-++0--0+0"; }
+    return "+0-++-0+--+0+-0-";
+}
+
+fn preset_trit(preset: i32, sym: i64) i32 {
+    let pat: []u8 = preset_pattern(preset);
+    let idx: i32 = (sym % (pat.len as i64)) as i32;
+    let ch: i32 = pat[idx] as i32;
+    if (ch == '+') { return 1; }
+    if (ch == '-') { return 0 - 1; }
+    return 0;
+}
+
+struct SNode {
+    comp_id: i32,
+    kind: Kind,
+    soh: i32,        // adjacent SOH tiles (chamber memory depth)
+    input_sum: i32,  // summed field arriving this symbol
+    out_t: i32,      // output trit this symbol
+    prev_t: i32,     // previous output (cavity feedback)
+    hist: list.ArrayList[i32],   // ring of last hist_len() output trits
+}
+
+struct SGuide {
+    guide_id: i32,
+    from_c: i32,
+    to_c: i32,
+    delay: i32,
+    ring: list.ArrayList[i32],   // delay-line ring buffer
+    head: i32,
+    arrived: i32,                // trit delivered to the sink this symbol
+}
+
+struct Sim {
+    nodes: list.ArrayList[SNode],
+    sguides: list.ArrayList[SGuide],
+    nidx: hm.IntMap[i32],        // comp id -> node index
+    symbol: i64,
+    playing: bool,
+    speed: f64,                  // symbols per second of wall time
+    accum: f64,
+}
+
+fn sim_new() *Sim {
+    return new(Sim{
+        .nodes = list.make[SNode](16),
+        .sguides = list.make[SGuide](16),
+        .nidx = hm.int_make[i32](64),
+        .symbol = 0,
+        .playing = false,
+        .speed = 12.0,
+        .accum = 0.0,
+    });
+}
+
+fn sim_node_index(sim: *Sim, comp_id: i32) i32 {
+    return hm.int_get[i32](sim.*.nidx, comp_id) orelse (0 - 1);
+}
+... 206 lines not shown ...

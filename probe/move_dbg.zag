@@ -1,0 +1,21 @@
+@import("../std/list.zag") as list
+@import("../src/scene.zag")
+@import("../src/editops.zag")
+
+fn main() i32 {
+    let s: *Scene = scene_new();
+    let _p1: i32 = scene_place(s, Kind.Plate, vox(120, 0, 0), 0);
+    let _p2: i32 = scene_place(s, Kind.Plate, vox(128, 0, 0), 0);
+    let e: i32 = scene_place(s, Kind.Emitter, vox(121, 1, 1), 0);
+    let d: i32 = scene_place(s, Kind.Detector, vox(126, 1, 1), 0);
+    _zag_print("e="); _zag_println(_zag_i64_to_str(e as i64));
+    _zag_print("d="); _zag_println(_zag_i64_to_str(d as i64));
+    let code: i32 = scene_can_place(s, Kind.Detector, vox(128, 1, 2), 0);
+    _zag_print("can place det at 128,1,2 code="); _zag_println(_zag_i64_to_str(code as i64));
+    let ids: list.ArrayList[i32] = list.make[i32](1);
+    list.push[i32](&ids, d);
+    let mv: i32 = group_can_move(s, &ids, vox(2, 0, 1));
+    _zag_print("group_can_move="); _zag_println(_zag_i64_to_str(mv as i64));
+    list.free[i32](&ids);
+    return 0;
+}

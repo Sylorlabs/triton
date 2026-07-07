@@ -1,0 +1,269 @@
+// tiles.zag — tile-based render cache for the 3D viewport.
+// 64×64 tiles track dirty regions so a static camera + unchanged scene can
+// skip the heavy grid/component pass and blit cached pixel+z slices instead.
+
+@import("../std/list.zag") as list
+@import("fb.zag")
+@import("math3d.zag")
+@import("ui.zag")
+
+fn TILE_SIZE() i32 { return 64; }
+fn tile_z_far() i64 { return 1099511627776; }   // match viewport.zag sentinel
+
+struct TileCache {
+    tiles_x: i32,
+    tiles_y: i32,
+    vp_x: i32,
+    vp_y: i32,
+    vp_w: i32,
+    vp_h: i32,
+    // per-tile state: dirty=1 needs redraw, valid=1 has cached px+z
+    dirty: list.ArrayList[i32],
+    valid: list.ArrayList[i32],
+    px: list.ArrayList[i64],
+    zb: list.ArrayList[i64],
+    // camera movement tracking (threshold-based)
+    prev_valid: i32,
+    prev_yaw: f64,
+    prev_pitch: f64,
+    prev_dist: f64,
+    prev_target: Vec3,
+    cam_moved: bool,
+}
+
+fn tile_stride() i32 { return TILE_SIZE() * TILE_SIZE(); }
+
+fn tiles_count(cache: *TileCache) i32 {
+    return cache.*.tiles_x * cache.*.tiles_y;
+}
+
+fn tile_index(cache: *TileCache, tx: i32, ty: i32) i32 {
+    return ty * cache.*.tiles_x + tx;
+}
+
+fn tiles_cache_new() TileCache {
+    return TileCache{
+        .tiles_x = 0,
+        .tiles_y = 0,
+        .vp_x = 0,
+        .vp_y = 0,
+        .vp_w = 0,
+        .vp_h = 0,
+        .dirty = list.make[i32](1),
+        .valid = list.make[i32](1),
+        .px = list.make[i64](1),
+        .zb = list.make[i64](1),
+        .prev_valid = 0,
+        .prev_yaw = 0.0,
+        .prev_pitch = 0.0,
+        .prev_dist = 0.0,
+        .prev_target = v3(0.0, 0.0, 0.0),
+        .cam_moved = true,
+    };
+}
+
+fn tiles_cache_free(cache: *TileCache) void {
+    list.free[i32](&cache.*.dirty);
+    list.free[i32](&cache.*.valid);
+    list.free[i64](&cache.*.px);
+    list.free[i64](&cache.*.zb);
+}
+
+fn tiles_alloc_tiles(cache: *TileCache, tx: i32, ty: i32) void {
+    list.free[i32](&cache.*.dirty);
+    list.free[i32](&cache.*.valid);
+    list.free[i64](&cache.*.px);
+    list.free[i64](&cache.*.zb);
+    let n: i32 = tx * ty;
+    let slab: i32 = n * tile_stride();
+    cache.*.dirty = list.make[i32](n);
+    cache.*.valid = list.make[i32](n);
+    cache.*.px = list.make[i64](slab);
+    cache.*.zb = list.make[i64](slab);
+    cache.*.dirty.len = n;
+    cache.*.valid.len = n;
+    cache.*.px.len = slab;
+    cache.*.zb.len = slab;
+    cache.*.tiles_x = tx;
+    cache.*.tiles_y = ty;
+    tiles_mark_all_dirty(cache);
+}
+
+fn tiles_cache_ensure(cache: *TileCache, vp: Rect) void {
+    let tx: i32 = (vp.w + TILE_SIZE() - 1) / TILE_SIZE();
+    let ty: i32 = (vp.h + TILE_SIZE() - 1) / TILE_SIZE();
+    if (tx < 1) { tx = 1; }
+    if (ty < 1) { ty = 1; }
+    if (tx != cache.*.tiles_x || ty != cache.*.tiles_y) {
+        tiles_alloc_tiles(cache, tx, ty);
+    }
+    if (vp.x != cache.*.vp_x || vp.y != cache.*.vp_y ||
+        vp.w != cache.*.vp_w || vp.h != cache.*.vp_h) {
+        cache.*.vp_x = vp.x;
+        cache.*.vp_y = vp.y;
+        cache.*.vp_w = vp.w;
+        cache.*.vp_h = vp.h;
+        tiles_mark_all_dirty(cache);
+        cache.*.cam_moved = true;
+    }
+}
+
+fn tiles_mark_all_dirty(cache: *TileCache) void {
+    let i: i32 = 0;
+    let n: i32 = tiles_count(cache);
+    while (i < n) {
+        cache.*.dirty.data[i] = 1;
+        cache.*.valid.data[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn tiles_marks_from_cam(cache: *TileCache, cam: Cam, vp: Rect) void {
+    tiles_cache_ensure(cache, vp);
+    let thresh_yaw: f64 = 0.0002;
+    let thresh_pitch: f64 = 0.0002;
+    let thresh_dist: f64 = 0.05;
+    let thresh_tgt: f64 = 0.05;
+    let moved: bool = false;
+    if (cache.*.prev_valid == 0) {
+        moved = true;
+    } else {
+        if (fabs(cam.yaw - cache.*.prev_yaw) > thresh_yaw) { moved = true; }
+        if (fabs(cam.pitch - cache.*.prev_pitch) > thresh_pitch) { moved = true; }
+        if (fabs(cam.dist - cache.*.prev_dist) > thresh_dist) { moved = true; }
+        let dt: Vec3 = vsub(cam.target, cache.*.prev_target);
+        if (fabs(dt.x) > thresh_tgt) { moved = true; }
+        if (fabs(dt.y) > thresh_tgt) { moved = true; }
+        if (fabs(dt.z) > thresh_tgt) { moved = true; }
+    }
+    cache.*.cam_moved = moved;
+    if (moved) { tiles_mark_all_dirty(cache); }
+    cache.*.prev_yaw = cam.yaw;
+    cache.*.prev_pitch = cam.pitch;
+    cache.*.prev_dist = cam.dist;
+    cache.*.prev_target = cam.target;
+    cache.*.prev_valid = 1;
+}
+
+fn tiles_cache_ready(cache: *TileCache) bool {
+    let n: i32 = tiles_count(cache);
+    if (n == 0) { return false; }
+    let i: i32 = 0;
+    while (i < n) {
+        if (cache.*.dirty.data[i] != 0) { return false; }
+        if (cache.*.valid.data[i] == 0) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// Clear only dirty tile regions (gradient bands clipped per tile).
+fn vp_clear_tiled(f: *FB, vp: Rect, cache: *TileCache) void {
+    let c0: i64 = rgb(13, 14, 18);
+    let c1: i64 = rgb(18, 19, 24);
+    let c2: i64 = rgb(21, 23, 28);
+    let c3: i64 = rgb(24, 26, 33);
+    let band_h: i32 = vp.h / 4;
+    if (band_h < 1) { band_h = 1; }
+    let ty: i32 = 0;
+    while (ty < cache.*.tiles_y) {
+        let tx: i32 = 0;
+        while (tx < cache.*.tiles_x) {
+            let ti: i32 = tile_index(cache, tx, ty);
+            if (cache.*.dirty.data[ti] != 0) {
+                let x0: i32 = vp.x + tx * TILE_SIZE();
+                let y0: i32 = vp.y + ty * TILE_SIZE();
+                let tw: i32 = TILE_SIZE();
+                let th: i32 = TILE_SIZE();
+                if (x0 + tw > vp.x + vp.w) { tw = vp.x + vp.w - x0; }
+                if (y0 + th > vp.y + vp.h) { th = vp.y + vp.h - y0; }
+                let y: i32 = y0;
+                while (y < y0 + th) {
+                    let rel: i32 = y - vp.y;
+                    let band: i32 = rel / band_h;
+                    if (band > 3) { band = 3; }
+                    let c: i64 = c0;
+                    if (band == 1) { c = c1; }
+                    if (band == 2) { c = c2; }
+                    if (band == 3) { c = c3; }
+                    let base: i32 = y * f.*.w;
+                    let x: i32 = x0;
+                    while (x < x0 + tw) {
+                        f.*.px.data[base + x] = c;
+                        f.*.zb.data[base + x] = tile_z_far();
+                        x = x + 1;
+                    }
+                    y = y + 1;
+                }
+            }
+            tx = tx + 1;
+        }
+        ty = ty + 1;
+    }
+}
+
+fn tiles_blit(f: *FB, vp: Rect, cache: *TileCache) void {
+    let ty: i32 = 0;
+    while (ty < cache.*.tiles_y) {
+        let tx: i32 = 0;
+        while (tx < cache.*.tiles_x) {
+            let ti: i32 = tile_index(cache, tx, ty);
+            if (cache.*.valid.data[ti] != 0) {
+                let x0: i32 = vp.x + tx * TILE_SIZE();
+                let y0: i32 = vp.y + ty * TILE_SIZE();
+                let tw: i32 = TILE_SIZE();
+                let th: i32 = TILE_SIZE();
+                if (x0 + tw > vp.x + vp.w) { tw = vp.x + vp.w - x0; }
+                if (y0 + th > vp.y + vp.h) { th = vp.y + vp.h - y0; }
+                let dst_base: i32 = ti * tile_stride();
+                let yy: i32 = 0;
+                while (yy < th) {
+                    let src_row: i32 = dst_base + yy * TILE_SIZE();
+                    let dst_row: i32 = (y0 + yy) * f.*.w + x0;
+                    let xx: i32 = 0;
+                    while (xx < tw) {
+                        f.*.px.data[dst_row + xx] = cache.*.px.data[src_row + xx];
+                        f.*.zb.data[dst_row + xx] = cache.*.zb.data[src_row + xx];
+                        xx = xx + 1;
+                    }
+                    yy = yy + 1;
+                }
+            }
+            tx = tx + 1;
+        }
+        ty = ty + 1;
+    }
+}
+
+fn tiles_store_from_fb(f: *FB, vp: Rect, cache: *TileCache) void {
+    let ty: i32 = 0;
+    while (ty < cache.*.tiles_y) {
+        let tx: i32 = 0;
+        while (tx < cache.*.tiles_x) {
+            let ti: i32 = tile_index(cache, tx, ty);
+            let x0: i32 = vp.x + tx * TILE_SIZE();
+            let y0: i32 = vp.y + ty * TILE_SIZE();
+            let tw: i32 = TILE_SIZE();
+            let th: i32 = TILE_SIZE();
+            if (x0 + tw > vp.x + vp.w) { tw = vp.x + vp.w - x0; }
+            if (y0 + th > vp.y + vp.h) { th = vp.y + vp.h - y0; }
+            let dst_base: i32 = ti * tile_stride();
+            let yy: i32 = 0;
+            while (yy < th) {
+                let dst_row: i32 = dst_base + yy * TILE_SIZE();
+                let src_row: i32 = (y0 + yy) * f.*.w + x0;
+                let xx: i32 = 0;
+                while (xx < tw) {
+                    cache.*.px.data[dst_row + xx] = f.*.px.data[src_row + xx];
+                    cache.*.zb.data[dst_row + xx] = f.*.zb.data[src_row + xx];
+                    xx = xx + 1;
+                }
+                yy = yy + 1;
+            }
+            cache.*.dirty.data[ti] = 0;
+            cache.*.valid.data[ti] = 1;
+            tx = tx + 1;
+        }
+        ty = ty + 1;
+    }
+}

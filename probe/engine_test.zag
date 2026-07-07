@@ -1,0 +1,248 @@
+// engine_test.zag — headless engine validation:
+// placement DRC, removal cascades, A* routing, ternary interference sim.
+
+@import("../std/list.zag") as list
+@import("../src/scene.zag")
+@import("../src/routing.zag")
+@import("../src/sim.zag")
+@import("../src/editops.zag")
+
+fn check(name_: []u8, ok: bool, fails: *i32) void {
+    if (ok) {
+        _zag_print("  ok  ");
+        _zag_println(name_);
+    } else {
+        _zag_print("  XX  ");
+        _zag_println(name_);
+        fails.* = fails.* + 1;
+    }
+}
+
+fn main() i32 {
+    let fails: i32 = 0;
+    let s: *Scene = scene_new();
+
+    // ── placement rules ──
+    check("chamber floating in space rejected (needs plate)",
+        scene_can_place(s, Kind.Chamber, vox(1, 1, 1), 0) == 3, &fails);
+    check("plate off-ground rejected",
+        scene_can_place(s, Kind.Plate, vox(20, 1, 0), 0) == 2, &fails);
+
+    let plate: i32 = scene_place(s, Kind.Plate, vox(0, 0, 0), 0);
+    check("plate placed on ground", plate > 0, &fails);
+    check("chamber on plate accepted",
+        scene_can_place(s, Kind.Chamber, vox(3, 1, 3), 0) == 0, &fails);
+
+    let ch: i32 = scene_place(s, Kind.Chamber, vox(3, 1, 3), 0);
+    check("chamber placed", ch > 0, &fails);
+    check("overlapping chamber rejected",
+        scene_can_place(s, Kind.Chamber, vox(4, 1, 4), 0) == 1, &fails);
+
+    // ── emitters, detector, SOH ──
+    let e1: i32 = scene_place(s, Kind.Emitter, vox(0, 1, 1), 0);
+    let e2: i32 = scene_place(s, Kind.Emitter, vox(0, 1, 5), 0);
+    let det: i32 = scene_place(s, Kind.Detector, vox(7, 1, 4), 0);
+    check("emitters + detector placed", e1 > 0 && e2 > 0 && det > 0, &fails);
+
+    let e1i: i32 = scene_comp_index(s, e1);
+    let e2i: i32 = scene_comp_index(s, e2);
+    check("emitter WDM channels distinct",
+        s.*.comps.data[e1i].wl_nm < s.*.comps.data[e2i].wl_nm, &fails);
+
+    // ── routing ──
+    let e1c: Comp = s.*.comps.data[e1i];
+    let chc: Comp = s.*.comps.data[scene_comp_index(s, ch)];
+    let dtc: Comp = s.*.comps.data[scene_comp_index(s, det)];
+
+    let p1: list.ArrayList[Vox] = list.make[Vox](32);
+    let a1: Vox = comp_port_attach(e1c, 0);
+    let b1: Vox = comp_port_attach(chc, 0);   // IN.A
+    check("route emitter1 -> chamber IN.A", route_guide(s, a1, b1, &p1), &fails);
+    check("route endpoints correct",
+        vox_eq(p1.data[0], a1) && vox_eq(p1.data[p1.len - 1], b1), &fails);
+    // 6-connectivity of every hop
+    let conn: bool = true;
+    let hi: i32 = 1;
+    while (hi < p1.len) {
+        if (vox_manhattan(p1.data[hi], p1.data[hi - 1]) != 1) { conn = false; }
+        hi = hi + 1;
+    }
+    check("route is 6-connected", conn, &fails);
+    let g1: i32 = scene_add_guide(s, e1, 0, ch, 0, p1);
+
+    let p2: list.ArrayList[Vox] = list.make[Vox](32);
+    let e2c: Comp = s.*.comps.data[scene_comp_index(s, e2)];
+    let a2: Vox = comp_port_attach(e2c, 0);
+    let b2: Vox = comp_port_attach(chc, 1);   // IN.B
+    check("route emitter2 -> chamber IN.B", route_guide(s, a2, b2, &p2), &fails);
+    let _g2: i32 = scene_add_guide(s, e2, 0, ch, 1, p2);
+
+    let p3: list.ArrayList[Vox] = list.make[Vox](32);
+    let a3: Vox = comp_port_attach(chc, 3);   // OUT
+    let b3: Vox = comp_port_attach(dtc, 0);   // SENSE
+    check("route chamber OUT -> detector", route_guide(s, a3, b3, &p3), &fails);
+    let _g3: i32 = scene_add_guide(s, ch, 3, det, 0, p3);
+    check("port in use tracked", scene_port_in_use(s, ch, 0), &fails);
+
+    // ── interference sim ──
+    // Force constant opposite-phase sources: presets replaced by direct check
+    // of the balanced sum. preset 0 pattern starts "+0-.."; instead verify
+    // interference algebra directly, then run the compiled pipeline.
+    check("trit algebra: +1 & -1 cancel", trit_sat_add(1, 0 - 1) == 0, &fails);
+    check("trit algebra: +1 & +1 saturate", trit_from_sum(2) == 1, &fails);
+
+    let sim: *Sim = sim_new();
+    sim_recompile(sim, s);
+    check("sim compiled nodes", sim.*.nodes.len == s.*.comps.len, &fails);
+    check("sim compiled guides", sim.*.sguides.len == 3, &fails);
+
+    // Both emitters share preset stepping; drive 40 symbols and confirm the
+    // detector reproduces the interference of the two source patterns with
+    // the correct per-hop latency.
+    let steps: i32 = 0;
+    while (steps < 40) {
+        sim_step(sim, s);
+        steps = steps + 1;
+    }
+    // pipeline latency: emitter->chamber guide delay + chamber->detector delay
+    let d_in: i32 = guide_delay_symbols(list.len[Vox](s.*.guides.data[0].path));
+    let d_out: i32 = guide_delay_symbols(list.len[Vox](s.*.guides.data[2].path));
+    let lat: i32 = d_in + d_out;
+    // detector trit at t should equal sat(sum of both emitter trits at t-lat)
+    let e1p: i32 = s.*.comps.data[e1i].preset;
+    let e2p: i32 = s.*.comps.data[e2i].preset;
+    let all_match: bool = true;
+    let back: i32 = 0;
+    while (back < 20) {
+        let t_det: i64 = sim.*.symbol - 1 - (back as i64);
+        let t_src: i64 = t_det - (lat as i64);
+        if (t_src >= 0) {
+            let want: i32 = trit_from_sum(preset_trit(e1p, t_src) + preset_trit(e2p, t_src));
+            let got: i32 = sim_history(sim, det, back);
+            if (want != got) { all_match = false; }
+        }
+        back = back + 1;
+    }
+    check("detector reads interference of both WDM sources", all_match, &fails);
+
+    // ── SOH memory ──
+    let soh: i32 = scene_place(s, Kind.Soh, vox(5, 1, 3), 0);
+    check("SOH tile placed beside chamber", soh > 0, &fails);
+    check("chamber sees SOH tile", scene_soh_adjacent(s, ch) == 1, &fails);
+
+    // ── removal cascade ──
+    check("guides present before removal", s.*.guides.len == 3, &fails);
+    scene_remove(s, e1);
+    check("removing emitter drops its guide", s.*.guides.len == 2, &fails);
+    check("emitter cells freed", scene_cell_owner(s, vox(0, 1, 1)) < 0, &fails);
+    let refill: i32 = scene_place(s, Kind.Emitter, vox(0, 1, 1), 0);
+    check("freed cells reusable", refill > 0, &fails);
+
+    // chamber quota: fill a fresh plate with 64 chambers (8x8 of 2x2 at y=1
+    // exceeds an 8x8 plate; use 4 plates -> 16x16 area = 64 chambers exactly)
+    let q0: i32 = scene_place(s, Kind.Plate, vox(100, 0, 0), 0);
+    let _q1: i32 = scene_place(s, Kind.Plate, vox(108, 0, 0), 0);
+    let _q2: i32 = scene_place(s, Kind.Plate, vox(100, 0, 8), 0);
+    let _q3: i32 = scene_place(s, Kind.Plate, vox(108, 0, 8), 0);
+    check("quota plates placed", q0 > 0, &fails);
+    let placed: i32 = 0;
+    let qx: i32 = 0;
+    while (qx < 8) {
+        let qz: i32 = 0;
+        while (qz < 8) {
+            let r: i32 = scene_place(s, Kind.Chamber, vox(100 + qx * 2, 1, qz * 2), 0);
+            if (r > 0) { placed = placed + 1; }
+            qz = qz + 1;
+        }
+        qx = qx + 1;
+    }
+    // each 8x8 plate holds 16 chambers (4x4 of 2x2); the quota is per-plate,
+    // so all 64 place fine — but a 65th on any of those plates must fail...
+    check("64 chambers across the board", placed == 64, &fails);
+
+    // ── undo / redo journal ──
+    let j: Journal = journal_new();
+    let _jplate: i32 = scene_place(s, Kind.Plate, vox(130, 0, 0), 0);
+    let before_comps: i32 = s.*.comps.len;
+    let nch: i32 = scene_place(s, Kind.Chamber, vox(130, 1, 0), 0);
+    check("journal: chamber placed", nch > 0, &fails);
+    op_add_comp(&j, s, nch);
+    check("journal: undo removes it", journal_undo(&j, s) && s.*.comps.len == before_comps, &fails);
+    check("journal: redo restores it (same id)",
+        journal_redo(&j, s) && scene_comp_index(s, nch) >= 0, &fails);
+    op_del_comp(&j, s, nch);
+    scene_remove(s, nch);
+    check("journal: undo of delete restores", journal_undo(&j, s) && scene_comp_index(s, nch) >= 0, &fails);
+
+    // ── group move with waveguide re-route (fresh plate clear of quota grid) ──
+    let _mvplate: i32 = scene_place(s, Kind.Plate, vox(120, 0, 0), 0);
+    let mv_e: i32 = scene_place(s, Kind.Emitter, vox(121, 1, 1), 0);
+    let mv_d: i32 = scene_place(s, Kind.Detector, vox(125, 1, 1), 0);
+    check("move: parts placed", mv_e > 0 && mv_d > 0, &fails);
+    let mvec: Comp = s.*.comps.data[scene_comp_index(s, mv_e)];
+    let mvdc: Comp = s.*.comps.data[scene_comp_index(s, mv_d)];
+    let mp: list.ArrayList[Vox] = list.make[Vox](32);
+    check("move: routed", route_guide(s, comp_port_attach(mvec, 0), comp_port_attach(mvdc, 0), &mp), &fails);
+    let mgid: i32 = scene_add_guide(s, mv_e, 0, mv_d, 0, mp);
+    let ids: list.ArrayList[i32] = list.make[i32](2);
+    list.push[i32](&ids, mv_d);
+    check("move: DRC accepts shift", group_can_move(s, &ids, vox(1, 0, 1)) == 0, &fails);
+    group_move(s, &ids, vox(1, 0, 1));
+    let moved: Comp = s.*.comps.data[scene_comp_index(s, mv_d)];
+    check("move: origin updated", vox_eq(moved.origin, vox(126, 1, 2)), &fails);
+    let mgi: i32 = scene_guide_index(s, mgid);
+    check("move: guide survived re-route", mgi >= 0, &fails);
+    if (mgi >= 0) {
+        let g2: Guide = s.*.guides.data[mgi];
+        let want_end: Vox = comp_port_attach(moved, 0);
+        check("move: guide re-routed to new port",
+            vox_eq(list.get[Vox](g2.path, g2.path.len - 1), want_end), &fails);
+    }
+
+    // ── save / load roundtrip ──
+    check("save design", design_save(s, "/tmp/claude-1000/zpa_test.zpa"), &fails);
+    let s2: *Scene = scene_new();
+    check("load design", design_load(s2, "/tmp/claude-1000/zpa_test.zpa"), &fails);
+    check("roundtrip: component count", s2.*.comps.len == s.*.comps.len, &fails);
+    check("roundtrip: guide count", s2.*.guides.len == s.*.guides.len, &fails);
+    let rt_ok: bool = true;
+    let ri: i32 = 0;
+    while (ri < s.*.comps.len) {
+        let ca: Comp = s.*.comps.data[ri];
+        let ci2: i32 = scene_comp_index(s2, ca.id);
+        if (ci2 < 0) { rt_ok = false; }
+        else {
+            let cb: Comp = s2.*.comps.data[ci2];
+            if (!vox_eq(ca.origin, cb.origin) || ca.rot != cb.rot || kind_index(ca.kind) != kind_index(cb.kind)) { rt_ok = false; }
+            if (!_zag_str_eq_wrap(ca.name_, cb.name_)) { rt_ok = false; }
+        }
+        ri = ri + 1;
+    }
+    check("roundtrip: every part identical", rt_ok, &fails);
+    check("roundtrip: occupancy rebuilt",
+        scene_cell_owner(s2, s.*.comps.data[0].origin) == s.*.comps.data[0].id, &fails);
+    check("roundtrip: placement still enforced",
+        scene_can_place(s2, Kind.Chamber, vox(3, 1, 3), 0) == 1, &fails);
+
+    // ── journal persistence ──
+    let jj: Journal = journal_new();
+    let _jp: i32 = scene_place(s, Kind.Plate, vox(140, 0, 0), 0);
+    let jch: i32 = scene_place(s, Kind.Chamber, vox(140, 1, 0), 0);
+    op_add_comp(&jj, s, jch);
+    check("journal: save", journal_save(&jj, "/tmp/claude-1000/jrn_test.jrn"), &fails);
+    let jj2: Journal = journal_new();
+    check("journal: load", journal_load(&jj2, "/tmp/claude-1000/jrn_test.jrn"), &fails);
+    check("journal: roundtrip undo depth", jj2.undo.len == jj.undo.len, &fails);
+    let comps_before: i32 = s.*.comps.len;
+    check("journal: loaded undo works", journal_undo(&jj2, s) && s.*.comps.len == comps_before - 1, &fails);
+    journal_clear(&jj);
+    journal_clear(&jj2);
+
+    if (fails == 0) { _zag_println("ENGINE: ALL PASS"); return 0; }
+    _zag_println("ENGINE: FAILURES");
+    return 1;
+}
+
+fn _zag_str_eq_wrap(a: []u8, b: []u8) bool {
+    return _zag_strcmp(a, b) == 1;
+}

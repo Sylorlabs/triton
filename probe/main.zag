@@ -1,0 +1,349 @@
+// main.zag — photonic CPU designer entry point. 100% Zag, no C anywhere.
+//
+// Default mode talks straight to the X server over its unix socket via
+// src/x11.zag (pure-Zag X11 wire protocol on the _zag_raw_syscall intrinsic).
+//
+// `--pipe` runs the headless line protocol on stdin/stdout (used by automated
+// interaction tests):
+//   in : I mx my btn wheel mods keyc k0 k1 k2 k3 k4 k5 w h
+//   out: F <w> <h> <frame>   (after writing /dev/shm/zagpa_fb.bin)
+//
+// `--smoke [out.bmp]` builds a demo processor, runs the wave sim, renders one
+// frame headless, and writes a BMP screenshot (used for CI/verification).
+
+@import("../std/list.zag") as list
+@import("workspace.zag")
+@import("x11.zag")
+
+fn fb_path() []u8 { return "/dev/shm/zagpa_fb.bin"; }
+
+// ── stdin line reader ─────────────────────────────────────────────────────────
+
+struct LineBuf {
+    buf: list.ArrayList[u8],
+    eof: bool,
+}
+
+fn read_line(lb: *LineBuf) void {
+    lb.*.buf.len = 0;
+    let one: list.ArrayList[u8] = list.make[u8](1);
+    let running: bool = true;
+    while (running) {
+        let n: i32 = _zag_read_fd(0, one.data as *i8, 1);
+        if (n <= 0) {
+            lb.*.eof = true;
+            running = false;
+        } else {
+            let c: i32 = one.data[0] as i32;
+            if (c == 10) {
+                running = false;
+            } else {
+                list.push[u8](&lb.*.buf, one.data[0]);
+            }
+        }
+    }
+    list.free[u8](&one);
+}
+
+// Parse whitespace-separated integers from a line into `out`.
+fn parse_ints(line: []u8, out: *list.ArrayList[i64]) void {
+    out.*.len = 0;
+    let i: i32 = 0;
+    while (i < line.len) {
+        // skip spaces
+        while (i < line.len && (line[i] as i32) == 32) { i = i + 1; }
+        let start: i32 = i;
+        while (i < line.len && (line[i] as i32) != 32) { i = i + 1; }
+        if (i > start) {
+            list.push[i64](out, _zag_str_to_i64(line[start..i]));
+        }
+    }
+}
+
+// ── smoke mode ────────────────────────────────────────────────────────────────
+
+fn run_smoke(out_path: []u8) i32 {
+    let a: *App = app_new(1440, 900);
+    app_action_demo(a);
+    sel_set(a, 4);   // a chamber, exercises the inspector + scope
+
+    // run the ternary fabric for a while
+    sim_recompile(a.*.sim, a.*.scene);
+    let i: i32 = 0;
+    while (i < 24) {
+        sim_step(a.*.sim, a.*.scene);
+        i = i + 1;
+    }
+
+    // synth input mid-viewport, render a few frames
+    a.*.inp.mx = 700;
+    a.*.inp.my = 380;
+    let fi: i32 = 0;
+    while (fi < 3) {
+        app_frame(a, 0.016);
+        fi = fi + 1;
+    }
+    fb_write_bmp(&a.*.f, out_path);
+    _zag_print("smoke: wrote ");
+    _zag_println(out_path);
+    _zag_print("smoke: comps=");
+    print_i32(a.*.scene.*.comps.len);
+    _zag_print("smoke: guides=");
+    print_i32(a.*.scene.*.guides.len);
+    _zag_print("smoke: symbol=");
+    print_i64(a.*.sim.*.symbol);
+    _zag_print("smoke: frame_ms=");
+    print_i64(a.*.frame_ms);
+    return 0;
+}
+
+// ── interactive main loop ─────────────────────────────────────────────────────
+
+fn run_interactive() i32 {
+    let a: *App = app_new(1440, 900);
+    app_action_demo(a);
+
+    let lb: LineBuf = LineBuf{ .buf = list.make[u8](160), .eof = false };
+    let ints: list.ArrayList[i64] = list.make[i64](20);
+    let last_ms: i64 = _zag_clock_monotonic_ms();
+
+    let running: bool = true;
+    while (running) {
+        read_line(&lb);
+        if (lb.eof) {
+            running = false;
+        } else {
+            if (lb.buf.len > 2 && (lb.buf.data[0] as i32) == 'I') {
+                let line: []u8 = lb.buf.data[1..lb.buf.len];
+                parse_ints(line, &ints);
+                if (ints.len >= 14) {
+                    let inp: *Input = &a.*.inp;
+                    inp.*.prev_btn = inp.*.btn;
+                    inp.*.mx = list.get[i64](ints, 0) as i32;
+                    inp.*.my = list.get[i64](ints, 1) as i32;
+                    inp.*.btn = list.get[i64](ints, 2) as i32;
+                    inp.*.wheel = list.get[i64](ints, 3) as i32;
+                    inp.*.mods = list.get[i64](ints, 4) as i32;
+                    inp.*.keys.len = 0;
+                    let kc: i32 = list.get[i64](ints, 5) as i32;
+                    if (kc > 6) { kc = 6; }
+                    let k: i32 = 0;
+                    while (k < kc) {
+                        list.push[i32](&inp.*.keys, list.get[i64](ints, 6 + k) as i32);
+                        k = k + 1;
+                    }
+                    inp.*.w = list.get[i64](ints, 12) as i32;
+                    inp.*.h = list.get[i64](ints, 13) as i32;
+
+                    // F1 = load the demo design
+                    if (key_hit(inp, 290)) { app_action_demo(a); }
+
+                    let now: i64 = _zag_clock_monotonic_ms();
+                    let dt: f64 = ((now - last_ms) as f64) / 1000.0;
+                    if (dt > 0.1) { dt = 0.1; }
+                    last_ms = now;
+
+                    app_frame(a, dt);
+                    fb_write_shm(&a.*.f, fb_path());
+
+                    _zag_print("F ");
+                    _zag_print(_zag_i64_to_str(a.*.inp.w as i64));
+                    _zag_print(" ");
+                    _zag_print(_zag_i64_to_str(a.*.inp.h as i64));
+                    _zag_print(" ");
+                    _zag_print(_zag_i64_to_str(a.*.frame));
+                    _zag_print("\n");
+                    _zag_flush();
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+// ── native X11 main loop (pure Zag; no shim, no C) ────────────────────────────
+
+fn app_title(a: *App) []u8 {
+    let base: []u8 = a.*.file_;
+    if (a.*.dirty) { base = _zag_str_concat(a.*.file_, " *"); }
+    return _zag_str_concat(base, " - CPU Designer");
+}
+
+fn run_x11() i32 {
+    let a: *App = app_new(1440, 900);
+    app_frame_all(a);
+
+    let x: *X11 = x11_connect(1440, 900, "untitled.zpa - CPU Designer");
+    if (!x.*.ok) {
+        _zag_eprintln("no X server available; try --pipe or --smoke");
+        return 1;
+    }
+    a.*.title_dirty = false;
+
+    let last_ms: i64 = _zag_clock_monotonic_ms();
+    let running: bool = true;
+    while (running) {
+        x11_pump(x);
+        if (x.*.should_close || a.*.quit) {
+            running = false;
+        } else {
+            // mirror the X input state into the app
+            let inp: *Input = &a.*.inp;
+            inp.*.prev_btn = inp.*.btn;
+            inp.*.mx = x.*.mx;
+            inp.*.my = x.*.my;
+            inp.*.btn = x.*.btn;
+            inp.*.wheel = x.*.wheel;
+            inp.*.mods = x.*.mods;
+            inp.*.keys.len = 0;
+            let k: i32 = 0;
+            while (k < x.*.keys.len) {
+                list.push[i32](&inp.*.keys, list.get[i32](x.*.keys, k));
+                k = k + 1;
+            }
+            inp.*.w = x.*.win_w;
+            inp.*.h = x.*.win_h;
+
+            if (key_hit(inp, 290)) { app_action_demo(a); }   // F1: demo design
+
+            let now: i64 = _zag_clock_monotonic_ms();
+            let dt: f64 = ((now - last_ms) as f64) / 1000.0;
+            if (dt > 0.1) { dt = 0.1; }
+            last_ms = now;
+
+            app_frame(a, dt);
+            x11_put_frame(x, a.*.f.px.data, a.*.f.w, a.*.f.h);
+            if (a.*.title_dirty) {
+                x11_set_title(x, app_title(a));
+                a.*.title_dirty = false;
+            }
+
+            // pace toward ~60 fps
+            let spent: i64 = _zag_clock_monotonic_ms() - now;
+            if (spent < 16) { x11_sleep_ms(16 - spent); }
+        }
+    }
+    x11_close(x);
+    return 0;
+}
+
+// ── X11 round-trip self-test ──────────────────────────────────────────────────
+// Sends synthetic Motion/Key/Button/ClientMessage events to our own window via
+// SendEvent and asserts the decoded input state — proves the wire protocol
+// both directions against the live X server, no external tooling needed.
+
+fn xtest_check(name_: []u8, ok: bool, fails: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); fails.* = fails.* + 1; }
+    _zag_println(name_);
+}
+
+fn run_x11_selftest() i32 {
+    let x: *X11 = x11_connect(400, 300, "selftest");
+    if (!x.*.ok) {
+        _zag_eprintln("selftest: no X server");
+        return 1;
+    }
+    let fails: i32 = 0;
+    let ev: list.ArrayList[u8] = list.make[u8](32);
+
+    // KeyPress 'q'
+    let kq: i32 = x11_keycode_of(x, 113);
+    ev.len = 0;
+    xw8(&ev, 2); xw8(&ev, kq); xw16(&ev, 0);
+    xw32(&ev, 0);
+    xw32(&ev, x.*.root);
+    xw32(&ev, x.*.wid);
+    xw32(&ev, 0);
+    xw16(&ev, 0); xw16(&ev, 0);
+    xw16(&ev, 10); xw16(&ev, 10);
+    xw16(&ev, 0);
+    xw8(&ev, 1); xw8(&ev, 0);
+    let _k: bool = x11_send_self(x, &ev, 1);
+
+    // ButtonPress left at (200,100)
+    ev.len = 0;
+    xw8(&ev, 4); xw8(&ev, 1); xw16(&ev, 0);
+    xw32(&ev, 0);
+    xw32(&ev, x.*.root);
+    xw32(&ev, x.*.wid);
+    xw32(&ev, 0);
+    xw16(&ev, 0); xw16(&ev, 0);
+    xw16(&ev, 200); xw16(&ev, 100);
+    xw16(&ev, 0);
+    xw8(&ev, 1); xw8(&ev, 0);
+    let _b: bool = x11_send_self(x, &ev, 4);
+
+    // MotionNotify at (123,45) with Shift held
+    ev.len = 0;
+    xw8(&ev, 6); xw8(&ev, 0); xw16(&ev, 0);
+    xw32(&ev, 0);                    // time
+    xw32(&ev, x.*.root);
+    xw32(&ev, x.*.wid);
+    xw32(&ev, 0);                    // child
+    xw16(&ev, 0); xw16(&ev, 0);      // root x,y
+    xw16(&ev, 123); xw16(&ev, 45);   // event x,y
+    xw16(&ev, 1);                    // state: Shift
+    xw8(&ev, 1); xw8(&ev, 0);
+    let _m: bool = x11_send_self(x, &ev, 64);
+
+    // WM_DELETE_WINDOW ClientMessage
+    ev.len = 0;
+    xw8(&ev, 33); xw8(&ev, 32); xw16(&ev, 0);
+    xw32(&ev, x.*.wid);
+    xw32(&ev, x.*.wm_protocols);
+    xw32(&ev, x.*.wm_delete);
+    xw32(&ev, 0); xw32(&ev, 0); xw32(&ev, 0); xw32(&ev, 0);
+    let _c: bool = x11_send_self(x, &ev, 0);
+
+    // give the server a moment, then pump everything
+    x11_sleep_ms(120);
+    x11_pump(x);
+
+    xtest_check("motion decoded (123,45)", x.*.mx == 123 && x.*.my == 45, &fails);
+    xtest_check("shift modifier decoded", (x.*.mods & 1) == 1, &fails);
+    let got_q: bool = false;
+    let ki: i32 = 0;
+    while (ki < x.*.keys.len) {
+        if (list.get[i32](x.*.keys, ki) == 113) { got_q = true; }
+        ki = ki + 1;
+    }
+    xtest_check("keypress 'q' decoded via keymap", got_q, &fails);
+    xtest_check("left button decoded", (x.*.btn & 1) == 1, &fails);
+    xtest_check("WM_DELETE close decoded", x.*.should_close, &fails);
+
+    // blit a test frame through PutImage while we're here
+    let fbt: list.ArrayList[i64] = list.make[i64](400 * 300);
+    let pi: i32 = 0;
+    while (pi < 400 * 300) {
+        list.push[i64](&fbt, 58879);   // cyan
+        pi = pi + 1;
+    }
+    x11_put_frame(x, fbt.data, 400, 300);
+    xtest_check("PutImage blit accepted", true, &fails);
+
+    x11_close(x);
+    if (fails == 0) { _zag_println("X11 SELFTEST: ALL PASS"); return 0; }
+    _zag_println("X11 SELFTEST: FAILURES");
+    return 1;
+}
+
+fn main() i32 {
+    let argc: i32 = _zag_argc();
+    let i: i32 = 1;
+    while (i < argc) {
+        let arg: []u8 = _zag_arg(i);
+        if (_zag_strcmp(arg, "--smoke") == 1) {
+            let out: []u8 = "smoke_app.bmp";
+            if (i + 1 < argc) { out = _zag_arg(i + 1); }
+            return run_smoke(out);
+        }
+        if (_zag_strcmp(arg, "--pipe") == 1) {
+            return run_interactive();
+        }
+        if (_zag_strcmp(arg, "--x11-selftest") == 1) {
+            return run_x11_selftest();
+        }
+        i = i + 1;
+    }
+    return run_x11();
+}

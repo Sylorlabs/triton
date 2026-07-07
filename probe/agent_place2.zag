@@ -1,0 +1,19 @@
+// Minimal repro: two scene_place calls like agent path.
+@import("../std/list.zag") as list
+@import("../src/scene.zag")
+@import("../src/app.zag")
+
+fn main() i32 {
+    let a: *App = app_new(64, 64);
+    scene_clear(a.*.scene);
+    let p1: i32 = scene_place(a.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    _zag_print("p1=");
+    _zag_println(_zag_i64_to_str(p1 as i64));
+    let p2: i32 = scene_place(a.*.scene, Kind.Emitter, vox(1, 1, 2), 0);
+    _zag_print("p2=");
+    _zag_println(_zag_i64_to_str(p2 as i64));
+    let ci: i32 = scene_comp_index(a.*.scene, p2);
+    let nm: []u8 = a.*.scene.*.comps.data[ci].name_;
+    _zag_println(nm);
+    return 0;
+}

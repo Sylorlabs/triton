@@ -1,0 +1,252 @@
+// routing.zag — waveguide routing engine. A* over the free voxel lattice,
+// 6-connected, with a bend penalty so routes prefer long straight optical
+// runs (every bend in a real waveguide is an insertion-loss event).
+
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("voxel.zag")
+@import("scene.zag")
+
+fn step_cost() i32 { return 10; }
+fn bend_cost() i32 { return 40; }
+fn layer_min() i32 { return 1; }    // guides never tunnel through the substrate
+fn layer_max() i32 { return 12; }
+fn route_margin() i32 { return 6; } // search window padding around endpoints
+
+struct RNode {
+    cell: Vox,
+    dir: i32,     // incoming direction 0..5, 6 = none (start)
+    g: i32,
+    f: i32,
+    parent: i32,  // pool index of predecessor, -1 for start
+    open: bool,
+}
+
+fn r_min(a: i32, b: i32) i32 {
+    if (a < b) { return a; }
+    return b;
+}
+
+fn r_max(a: i32, b: i32) i32 {
+    if (a > b) { return a; }
+    return b;
+}
+
+// Six-connected lattice step for direction index 0..5.
+fn r_dir(d: i32) Vox {
+    if (d == 0) { return vox(1, 0, 0); }
+    if (d == 1) { return vox(0 - 1, 0, 0); }
+    if (d == 2) { return vox(0, 0, 1); }
+    if (d == 3) { return vox(0, 0, 0 - 1); }
+    if (d == 4) { return vox(0, 1, 0); }
+    if (d == 5) { return vox(0, 0 - 1, 0); }
+    return vox(0, 0, 0);
+}
+
+// True when `cell` lies inside the padded search window, within the allowed
+// waveguide layer band, and is not occupied by a component.
+fn route_cell_free(
+    s: *Scene,
+    cell: Vox,
+    bx0: i32, bx1: i32,
+    by0: i32, by1: i32,
+    bz0: i32, bz1: i32,
+) bool {
+    if (cell.x < bx0 || cell.x > bx1) { return false; }
+    if (cell.y < by0 || cell.y > by1) { return false; }
+    if (cell.z < bz0 || cell.z > bz1) { return false; }
+    if (cell.y < layer_min() || cell.y > layer_max()) { return false; }
+    if (scene_cell_owner(s, cell) >= 0) { return false; }
+    return true;
+}
+
+fn r_heuristic(cell: Vox, goal: Vox) i32 {
+    return vox_manhattan(cell, goal) * step_cost();
+}
+
+// Pack (cell, incoming-dir) into a unique i64 key for the best-cost table.
+fn r_state_key(cell: Vox, dir: i32) i64 {
+    let base: i64 = vox_key(cell);
+    let d: i64 = dir as i64;
+    return base * 8 + d;
+}
+
+fn r_pool_push(pool: *list.ArrayList[RNode], n: RNode) i32 {
+    let idx: i32 = pool.*.len;
+    list.push[RNode](pool, n);
+    return idx;
+}
+
+// Linear scan of the open set for the lowest-f node.
+fn r_open_best(pool: list.ArrayList[RNode]) i32 {
+    let best: i32 = 0 - 1;
+    let best_f: i32 = 2147483647;
+    let i: i32 = 0;
+    while (i < pool.len) {
+        if (pool.data[i].open) {
+            if (best < 0 || pool.data[i].f < best_f) {
+                best = i;
+                best_f = pool.data[i].f;
+            }
+        }
+        i = i + 1;
+    }
+    return best;
+}
+
+// Walk parent links from `end_idx` and fill `out` start..goal inclusive.
+fn r_reconstruct(pool: list.ArrayList[RNode], end_idx: i32, out: *list.ArrayList[Vox]) void {
+    let chain: list.ArrayList[Vox] = list.make[Vox](32);
+    let idx: i32 = end_idx;
+    while (idx >= 0) {
+        list.push[Vox](&chain, pool.data[idx].cell);
+        idx = pool.data[idx].parent;
+    }
+    let i: i32 = chain.len - 1;
+    while (i >= 0) {
+        list.push[Vox](out, chain.data[i]);
+        i = i - 1;
+    }
+    list.free[Vox](&chain);
+}
+
+// True when direction `nd` is the immediate reverse of incoming `pd`.
+fn r_is_uturn(pd: i32, nd: i32) bool {
+    if (pd == 6) { return false; }
+    if (pd == 0 && nd == 1) { return true; }
+    if (pd == 1 && nd == 0) { return true; }
+    if (pd == 2 && nd == 3) { return true; }
+    if (pd == 3 && nd == 2) { return true; }
+    if (pd == 4 && nd == 5) { return true; }
+    if (pd == 5 && nd == 4) { return true; }
+    return false;
+}
+
+// Try to relax a neighbor state; returns true when the open set changed.
+fn r_try_neighbor(
+    s: *Scene,
+    pool: *list.ArrayList[RNode],
+    best: *hm.Int64Map[i32],
+    cur_i: i32,
+    cur: RNode,
+    nd: i32,
+    goal: Vox,
+    bx0: i32, bx1: i32,
+    by0: i32, by1: i32,
+    bz0: i32, bz1: i32,
+) bool {
+    if (r_is_uturn(cur.dir, nd)) { return false; }
+
+    let delta: Vox = r_dir(nd);
+    let nb: Vox = vox_add(cur.cell, delta);
+    if (vox_eq(nb, goal)) {
+        // goal attach cell may coincide with a port footprint
+    } else if (!route_cell_free(s, nb, bx0, bx1, by0, by1, bz0, bz1)) {
+        return false;
+    }
+
+    let step: i32 = step_cost();
+    let bend: i32 = 0;
+    if (cur.dir != 6 && cur.dir != nd) { bend = bend_cost(); }
+    let ng: i32 = cur.g + step + bend;
+
+    let sk: i64 = r_state_key(nb, nd);
+    let pi: i32 = hm.int64_get[i32](best.*, sk) orelse (0 - 1);
+    if (pi >= 0) {
+        if (pool.*.data[pi].g <= ng) { return false; }
+        if (!pool.*.data[pi].open) { return false; }
+        let nh: i32 = ng + r_heuristic(nb, goal);
+        pool.*.data[pi].g = ng;
+        pool.*.data[pi].f = nh;
+        pool.*.data[pi].parent = cur_i;
+        return true;
+    }
+
+    let nh2: i32 = ng + r_heuristic(nb, goal);
+    let nn: RNode = RNode{
+        .cell = nb,
+        .dir = nd,
+        .g = ng,
+        .f = nh2,
+        .parent = cur_i,
+        .open = true,
+    };
+    let ni: i32 = r_pool_push(pool, nn);
+    hm.int64_put[i32](best, sk, ni);
+    return true;
+}
+
+// A* route from attach cell `start` to attach cell `goal`. On success, fills
+// `out` with every lattice cell along the path (endpoints inclusive).
+fn route_guide(s: *Scene, start: Vox, goal: Vox, out: *list.ArrayList[Vox]) bool {
+    out.*.len = 0;
+
+    let bx0: i32 = r_min(start.x, goal.x) - route_margin();
+    let bx1: i32 = r_max(start.x, goal.x) + route_margin();
+    let by0: i32 = r_min(start.y, goal.y) - route_margin();
+    let by1: i32 = r_max(start.y, goal.y) + route_margin();
+    let bz0: i32 = r_min(start.z, goal.z) - route_margin();
+    let bz1: i32 = r_max(start.z, goal.z) + route_margin();
+
+    if (start.y < layer_min() || start.y > layer_max()) { return false; }
+    if (goal.y < layer_min() || goal.y > layer_max()) { return false; }
+
+    if (vox_eq(start, goal)) {
+        list.push[Vox](out, start);
+        return true;
+    }
+
+    let pool: list.ArrayList[RNode] = list.make[RNode](64);
+    let best: hm.Int64Map[i32] = hm.int64_make[i32](256);
+
+    let h0: i32 = r_heuristic(start, goal);
+    let root: RNode = RNode{
+        .cell = start,
+        .dir = 6,
+        .g = 0,
+        .f = h0,
+        .parent = 0 - 1,
+        .open = true,
+    };
+    let root_i: i32 = r_pool_push(&pool, root);
+    hm.int64_put[i32](&best, r_state_key(start, 6), root_i);
+
+    let found: bool = false;
+    let end_idx: i32 = 0 - 1;
+
+    let guard: i32 = 0;
+    let running: bool = true;
+    while (guard < 65536 && running) {
+        let cur_i: i32 = r_open_best(pool);
+        if (cur_i < 0) {
+            running = false;
+        } else {
+            let cur: RNode = pool.data[cur_i];
+            pool.data[cur_i].open = false;
+
+            if (vox_eq(cur.cell, goal)) {
+                found = true;
+                end_idx = cur_i;
+                running = false;
+            } else {
+                let nd: i32 = 0;
+                while (nd < 6) {
+                    let _changed: bool = r_try_neighbor(
+                        s, &pool, &best, cur_i, cur, nd, goal,
+                        bx0, bx1, by0, by1, bz0, bz1,
+                    );
+                    nd = nd + 1;
+                }
+            }
+        }
+        guard = guard + 1;
+    }
+
+    if (found) {
+        r_reconstruct(pool, end_idx, out);
+    }
+
+    hm.int64_free[i32](&best);
+    list.free[RNode](&pool);
+    return found;
+}

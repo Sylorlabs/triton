@@ -1,0 +1,10 @@
+// break_test.zag — verify Zag `break` in native backend.
+fn main() i32 {
+    let n: i32 = 0;
+    while (n < 10) {
+        n = n + 1;
+        if (n == 3) { break; }
+    }
+    _zag_println(_zag_i64_to_str(n as i64));
+    return n;
+}

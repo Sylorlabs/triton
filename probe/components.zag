@@ -1,0 +1,81 @@
+// components.zag — the photonic hardware library.
+// Footprints, optical ports, and placement rules on the 250 nm voxel lattice.
+
+@import("voxel.zag")
+
+fn pitch_nm() f64 { return 250.0; }
+
+enum Kind {
+    Plate,     // GeSn base plate: substrate waffle grid, 8x8 lattice cells
+    Chamber,   // Execution chamber: reflective interference cavity, 3-in/1-out
+    Soh,       // SOH matrix tile: crystal memory plane (chamber integrator)
+    Emitter,   // WDM laser emitter: multi-wavelength ternary source @ 110 GHz
+    Detector,  // MoS2 photodetector: monolayer phase-discriminating readout
+}
+
+fn kind_count() i32 { return 5; }
+
+fn kind_index(k: Kind) i32 {
+    return switch (k) {
+        .Plate => 0,
+        .Chamber => 1,
+        .Soh => 2,
+        .Emitter => 3,
+        .Detector => 4,
+    };
+}
+
+fn kind_at(i: i32) Kind {
+    if (i == 1) { return Kind.Chamber; }
+    if (i == 2) { return Kind.Soh; }
+    if (i == 3) { return Kind.Emitter; }
+    if (i == 4) { return Kind.Detector; }
+    return Kind.Plate;
+}
+
+fn kind_name(k: Kind) []u8 {
+    return switch (k) {
+        .Plate => "GeSn Base Plate",
+        .Chamber => "Execution Chamber",
+        .Soh => "SOH Matrix Tile",
+        .Emitter => "WDM Laser Emitter",
+        .Detector => "MoS2 Photodetector",
+    };
+}
+
+fn kind_short(k: Kind) []u8 {
+    return switch (k) {
+        .Plate => "GeSn Plate",
+        .Chamber => "Exec Chamber",
+        .Soh => "SOH Tile",
+        .Emitter => "WDM Emitter",
+        .Detector => "MoS2 Sensor",
+    };
+}
+
+fn kind_blurb(k: Kind) []u8 {
+    return switch (k) {
+        .Plate => "Substrate waffle grid, 8x8 cells",
+        .Chamber => "Interference cavity, 3-in 1-out",
+        .Soh => "Crystal memory plane, integrates",
+        .Emitter => "Ternary phase source, 110 GHz",
+        .Detector => "Monolayer phase readout",
+    };
+}
+
+// Footprint extent in voxels at rotation 0.
+fn kind_fp(k: Kind) Vox {
+    return switch (k) {
+        .Plate => vox(8, 1, 8),
+        .Chamber => vox(2, 2, 2),
+        .Soh => vox(1, 2, 2),
+        .Emitter => vox(1, 2, 1),
+        .Detector => vox(1, 1, 1),
+    };
+}
+
+// Toolbar chip / outliner color (0x00RRGGBB as i64).
+fn kind_tint(k: Kind) i64 {
+    return switch (k) {
+        .Plate => 6318198,       // (96,104,118) steel gray
+... 69 lines not shown ...

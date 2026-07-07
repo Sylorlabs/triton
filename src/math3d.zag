@@ -1,0 +1,268 @@
+// math3d.zag — vectors, orbit camera, projection, and picking rays.
+// World space: 1.0 unit = one lattice voxel = 250 nm. +Y is up.
+//
+// CODEGEN DISCIPLINE (znc 2026.06, see NOTES.md):
+//   1. FREE FUNCTIONS ONLY — receiver-method calls inside struct-returning
+//      functions clobber the hidden return slot and segfault.
+//   2. One struct-returning call per statement, always assigned to a `let`;
+//      never nest a struct-returning call in another call's arguments or in
+//      a struct literal.
+
+struct Vec3 {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+fn v3(x: f64, y: f64, z: f64) Vec3 {
+    return Vec3{ .x = x, .y = y, .z = z };
+}
+
+fn vadd(a: Vec3, b: Vec3) Vec3 {
+    return v3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+
+fn vsub(a: Vec3, b: Vec3) Vec3 {
+    return v3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+fn vscale(a: Vec3, s: f64) Vec3 {
+    return v3(a.x * s, a.y * s, a.z * s);
+}
+
+fn vdot(a: Vec3, b: Vec3) f64 {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+fn vcross(a: Vec3, b: Vec3) Vec3 {
+    return v3(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+    );
+}
+
+fn vlen(a: Vec3) f64 {
+    return sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+}
+
+fn vnorm(a: Vec3) Vec3 {
+    let l: f64 = vlen(a);
+    if (l < 0.000000001) { return v3(0.0, 0.0, 0.0); }
+    return v3(a.x / l, a.y / l, a.z / l);
+}
+
+fn clampf(v: f64, lo: f64, hi: f64) f64 {
+    if (v < lo) { return lo; }
+    if (v > hi) { return hi; }
+    return v;
+}
+
+fn clampi(v: i32, lo: i32, hi: i32) i32 {
+    if (v < lo) { return lo; }
+    if (v > hi) { return hi; }
+    return v;
+}
+
+fn ifloor(v: f64) i32 {
+    let t: i32 = v as i32;
+    if ((t as f64) > v) { return t - 1; }
+    return t;
+}
+
+fn fmin(a: f64, b: f64) f64 {
+    if (a < b) { return a; }
+    return b;
+}
+
+fn fmax(a: f64, b: f64) f64 {
+    if (a > b) { return a; }
+    return b;
+}
+
+fn fabs(v: f64) f64 {
+    if (v < 0.0) { return 0.0 - v; }
+    return v;
+}
+
+fn imax(a: i32, b: i32) i32 {
+    if (a > b) { return a; }
+    return b;
+}
+
+fn imin(a: i32, b: i32) i32 {
+    if (a < b) { return a; }
+    return b;
+}
+
+fn iabs(a: i32) i32 {
+    if (a < 0) { return 0 - a; }
+    return a;
+}
+
+// ── orbit camera ─────────────────────────────────────────────────────────────
+
+struct Cam {
+    target: Vec3,
+    yaw: f64,    // radians around +Y
+    pitch: f64,  // radians above horizon
+    dist: f64,
+    // cached basis, refreshed by cam_update
+    eye: Vec3,
+    fwd: Vec3,
+    right: Vec3,
+    up: Vec3,
+    flen: f64,   // focal length in pixels for current viewport height
+}
+
+fn cam_new() Cam {
+    let zero: Vec3 = v3(0.0, 0.0, 0.0);
+    let c: Cam = Cam{
+        .target = v3(16.0, 1.0, 16.0),
+        .yaw = 0.9,
+        .pitch = 0.62,
+        .dist = 34.0,
+        .eye = zero,
+        .fwd = v3(0.0, 0.0, 1.0),
+        .right = v3(1.0, 0.0, 0.0),
+        .up = v3(0.0, 1.0, 0.0),
+        .flen = 600.0,
+    };
+    return c;
+}
+
+// Recompute eye + orthonormal basis; vp_h drives the focal length (55 deg vfov).
+fn cam_update(c: *Cam, vp_h: i32) void {
+    c.*.pitch = clampf(c.*.pitch, 0.02, 1.52);
+    c.*.dist = clampf(c.*.dist, 4.0, 220.0);
+    let cp: f64 = cos(c.*.pitch);
+    let sp: f64 = sin(c.*.pitch);
+    let cy: f64 = cos(c.*.yaw);
+    let sy: f64 = sin(c.*.yaw);
+    let off: Vec3 = v3(cp * cy * c.*.dist, sp * c.*.dist, cp * sy * c.*.dist);
+    let tgt: Vec3 = c.*.target;
+    let eye: Vec3 = vadd(tgt, off);
+    c.*.eye = eye;
+    let f0: Vec3 = vsub(tgt, eye);
+    let fwd: Vec3 = vnorm(f0);
+    c.*.fwd = fwd;
+    let world_up: Vec3 = v3(0.0, 1.0, 0.0);
+    let r0: Vec3 = vcross(fwd, world_up);
+    let rgt: Vec3 = vnorm(r0);
+    c.*.right = rgt;
+    let up: Vec3 = vcross(rgt, fwd);
+    c.*.up = up;
+    // vfov 55deg: flen = (h/2) / tan(27.5deg); tan = sin/cos
+    let half: f64 = 0.4799655;  // 27.5 deg in radians
+    c.*.flen = ((vp_h as f64) * 0.5) * cos(half) / sin(half);
+}
+
+// Projected point: viewport-local pixel coords + view depth.
+struct SPt {
+    x: f64,
+    y: f64,
+    z: f64,   // distance along fwd; <= 0 means behind camera
+}
+
+fn project(c: Cam, vp_w: i32, vp_h: i32, p: Vec3) SPt {
+    let eye: Vec3 = c.eye;
+    let rel: Vec3 = vsub(p, eye);
+    let fwd: Vec3 = c.fwd;
+    let cz: f64 = vdot(rel, fwd);
+    if (cz < 0.05) {
+        return SPt{ .x = 0.0, .y = 0.0, .z = 0.0 - 1.0 };
+    }
+    let rgt: Vec3 = c.right;
+    let up: Vec3 = c.up;
+    let cx: f64 = vdot(rel, rgt);
+    let cyv: f64 = vdot(rel, up);
+    return SPt{
+        .x = (vp_w as f64) * 0.5 + cx * c.flen / cz,
+        .y = (vp_h as f64) * 0.5 - cyv * c.flen / cz,
+        .z = cz,
+    };
+}
+
+struct Ray {
+    org: Vec3,
+    dir: Vec3,
+}
+
+// Picking ray through a viewport-local pixel.
+fn ray_from_pixel(c: Cam, vp_w: i32, vp_h: i32, mx: i32, my: i32) Ray {
+    let px: f64 = (mx as f64) - (vp_w as f64) * 0.5;
+    let py: f64 = (vp_h as f64) * 0.5 - (my as f64);
+    let rgt: Vec3 = c.right;
+    let up: Vec3 = c.up;
+    let fwd: Vec3 = c.fwd;
+    let a: Vec3 = vscale(rgt, px / c.flen);
+    let b: Vec3 = vscale(up, py / c.flen);
+    let d0: Vec3 = vadd(fwd, a);
+    let d1: Vec3 = vadd(d0, b);
+    let d: Vec3 = vnorm(d1);
+    return Ray{ .org = c.eye, .dir = d };
+}
+
+struct RayHit {
+    hit: bool,
+    t: f64,
+    p: Vec3,
+}
+
+fn no_hit() RayHit {
+    let zero: Vec3 = v3(0.0, 0.0, 0.0);
+    return RayHit{ .hit = false, .t = 0.0, .p = zero };
+}
+
+fn ray_point(r: Ray, t: f64) Vec3 {
+    let d: Vec3 = r.dir;
+    let step: Vec3 = vscale(d, t);
+    let o: Vec3 = r.org;
+    let p: Vec3 = vadd(o, step);
+    return p;
+}
+
+// Intersect with horizontal plane y = level.
+fn ray_plane_y(r: Ray, level: f64) RayHit {
+    if (fabs(r.dir.y) < 0.000001) { return no_hit(); }
+    let t: f64 = (level - r.org.y) / r.dir.y;
+    if (t < 0.0) { return no_hit(); }
+    let p: Vec3 = ray_point(r, t);
+    return RayHit{ .hit = true, .t = t, .p = p };
+}
+
+// Slab test against an axis-aligned box.
+fn ray_aabb(r: Ray, bmin: Vec3, bmax: Vec3) RayHit {
+    let tmin: f64 = 0.0 - 1000000.0;
+    let tmax: f64 = 1000000.0;
+
+    if (fabs(r.dir.x) < 0.000001) {
+        if (r.org.x < bmin.x || r.org.x > bmax.x) { return no_hit(); }
+    } else {
+        let t1: f64 = (bmin.x - r.org.x) / r.dir.x;
+        let t2: f64 = (bmax.x - r.org.x) / r.dir.x;
+        tmin = fmax(tmin, fmin(t1, t2));
+        tmax = fmin(tmax, fmax(t1, t2));
+    }
+    if (fabs(r.dir.y) < 0.000001) {
+        if (r.org.y < bmin.y || r.org.y > bmax.y) { return no_hit(); }
+    } else {
+        let t1: f64 = (bmin.y - r.org.y) / r.dir.y;
+        let t2: f64 = (bmax.y - r.org.y) / r.dir.y;
+        tmin = fmax(tmin, fmin(t1, t2));
+        tmax = fmin(tmax, fmax(t1, t2));
+    }
+    if (fabs(r.dir.z) < 0.000001) {
+        if (r.org.z < bmin.z || r.org.z > bmax.z) { return no_hit(); }
+    } else {
+        let t1: f64 = (bmin.z - r.org.z) / r.dir.z;
+        let t2: f64 = (bmax.z - r.org.z) / r.dir.z;
+        tmin = fmax(tmin, fmin(t1, t2));
+        tmax = fmin(tmax, fmax(t1, t2));
+    }
+    if (tmax < tmin || tmax < 0.0) { return no_hit(); }
+    let t: f64 = tmin;
+    if (t < 0.0) { t = tmax; }
+    let p: Vec3 = ray_point(r, t);
+    return RayHit{ .hit = true, .t = t, .p = p };
+}

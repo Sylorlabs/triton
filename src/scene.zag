@@ -1,0 +1,645 @@
+// scene.zag — the design database. The scene is stored as (a) a voxel
+// occupancy lattice for snapping and design-rule checks and (b) a directed
+// graph of optical flow: component ports connected by routed waveguides.
+// Viewport meshes are derived from this, never authoritative.
+
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("voxel.zag")
+@import("components.zag")
+@import("world.zag")
+
+fn max_chambers_per_plate() i32 { return 64; }
+
+struct Comp {
+    id: i32,
+    kind: Kind,
+    origin: Vox,   // min-corner voxel
+    rot: i32,      // quarter turns about +Y
+    size: Vox,     // parametric extent (pre-rotation); kind_fp is the default
+    visible: bool,
+    wl_nm: f64,    // WDM channel (emitters)
+    preset: i32,   // emitter symbol-pattern preset
+    name_: []u8,
+}
+
+struct Guide {
+    id: i32,
+    from_c: i32,   // source component id (output port owner)
+    from_p: i32,
+    to_c: i32,     // sink component id (input port owner)
+    to_p: i32,
+    path: list.ArrayList[Vox],   // attach cell .. attach cell, 6-connected
+    length_nm: f64,
+    live: i32,     // trit currently arriving at the sink (viewport coloring)
+}
+
+struct Scene {
+    comps: list.ArrayList[Comp],
+    guides: list.ArrayList[Guide],
+    occ: hm.Int64Map[i32],          // vox_key -> component id
+    world: *World,                  // sparse chunk index for region queries
+    comp_idx: hm.IntMap[i32],       // component id -> comps index (lazy rebuild)
+    idx_dirty: bool,
+    next_comp: i32,
+    next_guide: i32,
+    made: list.ArrayList[i32],      // per-kind naming counters
+    topo_dirty: bool,               // optical topology changed -> sim recompiles
+    topo_dirty_ids: list.ArrayList[i32],  // comps needing incremental sim patch
+    topo_guides_dirty: bool,        // waveguide graph changed
+    topo_full_rebuild: bool,        // clear/load -> full sim recompile
+}
+
+fn scene_new() *Scene {
+    let s: *Scene = new(Scene{
+        .comps = list.make[Comp](32),
+        .guides = list.make[Guide](16),
+        .occ = hm.int64_make[i32](512),
+        .world = world_new(),
+        .comp_idx = hm.int_make[i32](64),
+        .idx_dirty = true,
+        .next_comp = 1,
+        .next_guide = 1,
+        .made = list.make[i32](8),
+        .topo_dirty = true,
+        .topo_dirty_ids = list.make[i32](8),
+        .topo_guides_dirty = true,
+        .topo_full_rebuild = true,
+    });
+    let i: i32 = 0;
+    while (i < kind_count()) {
+        list.push[i32](&s.*.made, 0);
+        i = i + 1;
+    }
+    return s;
+}
+
+// ── component geometry ────────────────────────────────────────────────────────
+
+fn comp_ext(c: Comp) Vox {
+    return rot_ext(c.size, c.rot);
+}
+
+// Map a default-footprint local cell into the parametric footprint: local
+// coordinates that referenced the max index of the default extent track the
+// resized max face, so ports stay pinned to their faces as the body grows.
+fn scale_cell(p: Vox, fp: Vox, sz: Vox) Vox {
+    let x: i32 = p.x;
+    if (p.x == fp.x - 1) { x = sz.x - 1; }
+    let y: i32 = p.y;
+    if (p.y == fp.y - 1) { y = sz.y - 1; }
+    let z: i32 = p.z;
+    if (p.z == fp.z - 1) { z = sz.z - 1; }
+    return vox(x, y, z);
+}
+
+// World voxel of a footprint-local (unrotated) offset.
+fn comp_l2w(c: Comp, p: Vox) Vox {
+    let fp: Vox = kind_fp(c.kind);
+    let sp: Vox = scale_cell(p, fp, c.size);
+    let r: Vox = rot_local(sp, c.size, c.rot);
+    return vox_add(c.origin, r);
+}
+
+// World cell owning port i.
+fn comp_port_cell(c: Comp, i: i32) Vox {
+    let p: Port = kind_port(c.kind, i);
+    return comp_l2w(c, p.cell);
+}
+
+// World face normal of port i.
+fn comp_port_dir(c: Comp, i: i32) Vox {
+    let p: Port = kind_port(c.kind, i);
+    return rot_dir(p.out, c.rot);
+}
+
+// World cell a waveguide attaches to for port i (one voxel out from the face).
+fn comp_port_attach(c: Comp, i: i32) Vox {
+    let cell: Vox = comp_port_cell(c, i);
+    let d: Vox = comp_port_dir(c, i);
+    return vox_add(cell, d);
+}
+
+// ── lookups ───────────────────────────────────────────────────────────────────
+
+// id -> comps index via a hashmap rebuilt lazily after mutations, so lookups
+// stay O(1) in 100k-component designs instead of scanning the list.
+fn scene_idx_rebuild(s: *Scene) void {
+    hm.int_free[i32](&s.*.comp_idx);
+    s.*.comp_idx = hm.int_make[i32](s.*.comps.len * 2 + 16);
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        hm.int_put[i32](&s.*.comp_idx, s.*.comps.data[i].id, i);
+        i = i + 1;
+    }
+    s.*.idx_dirty = false;
+}
+
+fn scene_comp_index(s: *Scene, id: i32) i32 {
+    if (s.*.idx_dirty) { scene_idx_rebuild(s); }
+    let got: ?i32 = hm.int_get[i32](s.*.comp_idx, id);
+    return got orelse (0 - 1);
+}
+
+fn scene_guide_index(s: *Scene, id: i32) i32 {
+    let i: i32 = 0;
+    while (i < s.*.guides.len) {
+        if (s.*.guides.data[i].id == id) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// Component id occupying a voxel, or -1.
+fn scene_cell_owner(s: *Scene, v: Vox) i32 {
+    let got: ?i32 = hm.int64_get[i32](s.*.occ, vox_key(v));
+    return got orelse (0 - 1);
+}
+
+// Fill `out` with every world cell of a parametric (size, origin, rot) box.
+fn scene_cells_ext(sz: Vox, origin: Vox, rot: i32, out: *list.ArrayList[Vox]) void {
+    let x: i32 = 0;
+    while (x < sz.x) {
+        let y: i32 = 0;
+        while (y < sz.y) {
+            let z: i32 = 0;
+            while (z < sz.z) {
+                let l: Vox = rot_local(vox(x, y, z), sz, rot);
+                list.push[Vox](out, vox_add(origin, l));
+                z = z + 1;
+            }
+            y = y + 1;
+        }
+        x = x + 1;
+    }
+}
+
+// Default-footprint cells of a (kind, origin, rot) — fresh placements.
+fn scene_cells_of(k: Kind, origin: Vox, rot: i32, out: *list.ArrayList[Vox]) void {
+    scene_cells_ext(kind_fp(k), origin, rot, out);
+}
+
+// Cells of a live component at its current parametric size.
+fn scene_cells_comp(c: Comp, out: *list.ArrayList[Vox]) void {
+    scene_cells_ext(c.size, c.origin, c.rot, out);
+}
+
+// occupancy primitives (also used by editops for move/undo/load)
+fn hm_put_cell(s: *Scene, v: Vox, id: i32) void {
+    hm.int64_put[i32](&s.*.occ, vox_key(v), id);
+    world_touch_vox(s.*.world, v, id);
+}
+
+fn hm_del_cell(s: *Scene, v: Vox) void {
+    let owner: i32 = hm.int64_get[i32](s.*.occ, vox_key(v)) orelse (0 - 1);
+    let _gone: bool = hm.del[i64, i32](&s.*.occ.inner, vox_key(v));
+    if (owner >= 0) {
+        world_remove_vox(s.*.world, v, owner);
+    }
+}
+
+fn hm_clear_occ(s: *Scene) void {
+    hm.int64_free[i32](&s.*.occ);
+    s.*.occ = hm.int64_make[i32](512);
+    world_clear(s.*.world);
+}
+
+// Plate id under a cell's XZ column, or -1. Scans downward so components can
+// rest on the top face of an extruded (thick) GeSn block at any height.
+fn scene_plate_under(s: *Scene, cell: Vox) i32 {
+    let y: i32 = cell.y - 1;
+    while (y >= 0) {
+        let owner: i32 = scene_cell_owner(s, vox(cell.x, y, cell.z));
+        if (owner >= 0) {
+            let ci: i32 = scene_comp_index(s, owner);
+            if (ci < 0) { return 0 - 1; }
+            if (s.*.comps.data[ci].kind == Kind.Plate) { return owner; }
+            return 0 - 1;
+        }
+        y = y - 1;
+    }
+    return 0 - 1;
+}
+
+// True when the voxel directly below `cell` belongs to a GeSn plate — the
+// support rule for parts resting on a substrate top face.
+fn scene_plate_below(s: *Scene, cell: Vox) bool {
+    if (cell.y <= 0) { return false; }
+    let owner: i32 = scene_cell_owner(s, vox(cell.x, cell.y - 1, cell.z));
+    if (owner < 0) { return false; }
+    let ci: i32 = scene_comp_index(s, owner);
+    if (ci < 0) { return false; }
+    return s.*.comps.data[ci].kind == Kind.Plate;
+}
+
+fn scene_chambers_on_plate(s: *Scene, plate_id: i32) i32 {
+    let n: i32 = 0;
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        if (s.*.comps.data[i].kind == Kind.Chamber) {
+            if (scene_plate_under(s, s.*.comps.data[i].origin) == plate_id) { n = n + 1; }
+        }
+        i = i + 1;
+    }
+    return n;
+}
+
+// ── design-rule check ─────────────────────────────────────────────────────────
+// 0 ok / 1 occupied / 2 plate-must-sit-on-ground / 3 needs-GeSn-plate /
+// 4 chamber quota (64 execution chambers per board).
+
+// Parametric DRC. `ignore_id` skips one component's own cells (resize/move
+// revalidation); pass -1 for fresh placements. Base-support is face-exact:
+// every base-layer cell of a plate-mounted part must rest on substrate,
+// whatever the plate's extruded thickness.
+fn scene_can_place_ext(s: *Scene, k: Kind, sz: Vox, origin: Vox, rot: i32, ignore_id: i32) i32 {
+    if (kind_ground_only(k) && origin.y != 0) { return 2; }
+    if (kind_needs_plate(k) && origin.y < 1) { return 3; }
+
+    let cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_ext(sz, origin, rot, &cells);
+    let verdict: i32 = 0;
+    let i: i32 = 0;
+    while (i < cells.len && verdict == 0) {
+        let cell: Vox = cells.data[i];
+        let owner: i32 = scene_cell_owner(s, cell);
+        if (owner >= 0 && owner != ignore_id) { verdict = 1; }
+        if (verdict == 0 && kind_needs_plate(k) && cell.y == origin.y) {
+            if (!scene_plate_below(s, cell)) { verdict = 3; }
+        }
+        i = i + 1;
+    }
+    list.free[Vox](&cells);
+    if (verdict != 0) { return verdict; }
+
+    if (k == Kind.Chamber) {
+        let plate: i32 = scene_plate_under(s, origin);
+        if (plate >= 0) {
+            if (scene_chambers_on_plate(s, plate) >= max_chambers_per_plate()) { return 4; }
+        }
+    }
+    return 0;
+}
+
+fn scene_can_place(s: *Scene, k: Kind, origin: Vox, rot: i32) i32 {
+    return scene_can_place_ext(s, k, kind_fp(k), origin, rot, 0 - 1);
+}
+
+fn place_err_text(code: i32) []u8 {
+    if (code == 1) { return "cell occupied"; }
+    if (code == 2) { return "plate must sit on the lattice floor"; }
+    if (code == 3) { return "needs GeSn plate underneath"; }
+    if (code == 4) { return "board full: 64 chambers max"; }
+    if (code == 5) { return "resize would orphan mounted parts"; }
+    return "ok";
+}
+
+// ── mutation ──────────────────────────────────────────────────────────────────
+
+// Place a component; returns its id, or -1 if the DRC rejects it.
+fn scene_place(s: *Scene, k: Kind, origin: Vox, rot: i32) i32 {
+    if (scene_can_place(s, k, origin, rot) != 0) { return 0 - 1; }
+
+    let id: i32 = s.*.next_comp;
+    s.*.next_comp = id + 1;
+    let ki: i32 = kind_index(k);
+    let serial: i32 = list.get[i32](s.*.made, ki) + 1;
+    list.set[i32](&s.*.made, ki, serial);
+
+    let numstr: []u8 = _zag_i64_to_str(serial as i64);
+    let base: []u8 = _zag_str_concat(kind_short(k), ".");
+    let nm: []u8 = _zag_str_concat(base, numstr);
+
+    let c: Comp = Comp{
+        .id = id,
+        .kind = k,
+        .origin = origin,
+        .rot = rot,
+        .size = kind_fp(k),
+        .visible = true,
+        .wl_nm = 1550.0,
+        .preset = 0,
+        .name_ = nm,
+    };
+    if (k == Kind.Emitter) {
+        let chan: i32 = serial - 1;
+        c.wl_nm = 1530.0 + 0.8 * (chan as f64);
+        c.preset = chan % 4;
+    }
+
+    let cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_of(k, origin, rot, &cells);
+    let i: i32 = 0;
+    while (i < cells.len) {
+        hm_put_cell(s, cells.data[i], id);
+        i = i + 1;
+    }
+    list.free[Vox](&cells);
+
+    list.push[Comp](&s.*.comps, c);
+    s.*.idx_dirty = true;
+    scene_mark_topo_comp(s, id);
+    return id;
+}
+
+// ── parametric resize ─────────────────────────────────────────────────────────
+// Returns 0 or a DRC code. Frees the old cells, validates the new extent at
+// the same origin (self-collision ignored), and — for plates — confirms every
+// part previously mounted on this plate is still fully supported; otherwise
+// the resize rolls back untouched.
+
+fn scene_resize(s: *Scene, id: i32, new_size: Vox) i32 {
+    let ci: i32 = scene_comp_index(s, id);
+    if (ci < 0) { return 1; }
+    let c: Comp = s.*.comps.data[ci];
+    if (!kind_resizable(c.kind)) { return 1; }
+    let sz: Vox = clamp_size(c.kind, new_size);
+    if (vox_eq(sz, c.size)) { return 0; }
+
+    let verdict: i32 = scene_can_place_ext(s, c.kind, sz, c.origin, c.rot, id);
+    if (verdict != 0) { return verdict; }
+
+    let old_cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_comp(c, &old_cells);
+    let i: i32 = 0;
+    while (i < old_cells.len) {
+        hm_del_cell(s, old_cells.data[i]);
+        i = i + 1;
+    }
+
+    let new_cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_ext(sz, c.origin, c.rot, &new_cells);
+    let j: i32 = 0;
+    while (j < new_cells.len) {
+        hm_put_cell(s, new_cells.data[j], id);
+        j = j + 1;
+    }
+
+    // plate shrink/thicken: every mounted part must keep full base support
+    let ok: bool = true;
+    if (c.kind == Kind.Plate) {
+        let m: i32 = 0;
+        while (m < s.*.comps.len && ok) {
+            let mc: Comp = s.*.comps.data[m];
+            if (mc.id != id && kind_needs_plate(mc.kind)) {
+                let base: list.ArrayList[Vox] = list.make[Vox](8);
+                scene_cells_comp(mc, &base);
+                let b: i32 = 0;
+                while (b < base.len && ok) {
+                    let cell: Vox = base.data[b];
+                    if (cell.y == mc.origin.y) {
+                        if (!scene_plate_below(s, cell)) { ok = false; }
+                    }
+                    b = b + 1;
+                }
+                list.free[Vox](&base);
+            }
+            m = m + 1;
+        }
+    }
+
+    if (!ok) {
+        // roll back to the old extent
+        let r: i32 = 0;
+        while (r < new_cells.len) {
+            hm_del_cell(s, new_cells.data[r]);
+            r = r + 1;
+        }
+        let r2: i32 = 0;
+        while (r2 < old_cells.len) {
+            hm_put_cell(s, old_cells.data[r2], id);
+            r2 = r2 + 1;
+        }
+        list.free[Vox](&old_cells);
+        list.free[Vox](&new_cells);
+        return 5;
+    }
+
+    s.*.comps.data[ci].size = sz;
+    list.free[Vox](&old_cells);
+    list.free[Vox](&new_cells);
+    scene_mark_topo_comp(s, id);
+    return 0;
+}
+
+fn scene_remove_guide_at(s: *Scene, gi: i32) void {
+    let fc: i32 = s.*.guides.data[gi].from_c;
+    let tc: i32 = s.*.guides.data[gi].to_c;
+    list.free[Vox](&s.*.guides.data[gi].path);
+    // ordered removal keeps outliner rows stable
+    let j: i32 = gi;
+    while (j + 1 < s.*.guides.len) {
+        s.*.guides.data[j] = s.*.guides.data[j + 1];
+        j = j + 1;
+    }
+    s.*.guides.len = s.*.guides.len - 1;
+    scene_mark_topo_comp(s, fc);
+    scene_mark_topo_comp(s, tc);
+    scene_mark_topo_guides(s);
+}
+
+fn scene_remove_guide(s: *Scene, gid: i32) void {
+    let gi: i32 = scene_guide_index(s, gid);
+    if (gi >= 0) { scene_remove_guide_at(s, gi); }
+}
+
+// Remove a component: frees its lattice cells and drops incident waveguides.
+fn scene_remove(s: *Scene, id: i32) void {
+    let ci: i32 = scene_comp_index(s, id);
+    if (ci < 0) { return; }
+    let c: Comp = s.*.comps.data[ci];
+
+    let cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_comp(c, &cells);
+    let i: i32 = 0;
+    while (i < cells.len) {
+        hm_del_cell(s, cells.data[i]);
+        i = i + 1;
+    }
+    list.free[Vox](&cells);
+
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        if (s.*.guides.data[gi].from_c == id || s.*.guides.data[gi].to_c == id) {
+            scene_remove_guide_at(s, gi);
+        } else {
+            gi = gi + 1;
+        }
+    }
+
+    let j: i32 = ci;
+    while (j + 1 < s.*.comps.len) {
+        s.*.comps.data[j] = s.*.comps.data[j + 1];
+        j = j + 1;
+    }
+    s.*.comps.len = s.*.comps.len - 1;
+    s.*.idx_dirty = true;
+    scene_mark_topo_comp(s, id);
+    scene_mark_topo_guides(s);
+}
+
+// ── waveguides ────────────────────────────────────────────────────────────────
+
+fn scene_port_in_use(s: *Scene, cid: i32, port: i32) bool {
+    let i: i32 = 0;
+    while (i < s.*.guides.len) {
+        let g: Guide = s.*.guides.data[i];
+        if (g.from_c == cid && g.from_p == port) { return true; }
+        if (g.to_c == cid && g.to_p == port) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Takes ownership of `path` (attach cell .. attach cell inclusive).
+fn scene_add_guide(s: *Scene, fc: i32, fp: i32, tc: i32, tp: i32, path: list.ArrayList[Vox]) i32 {
+    let id: i32 = s.*.next_guide;
+    s.*.next_guide = id + 1;
+    let steps: i32 = path.len - 1;
+    if (steps < 0) { steps = 0; }
+    let g: Guide = Guide{
+        .id = id,
+        .from_c = fc,
+        .from_p = fp,
+        .to_c = tc,
+        .to_p = tp,
+        .path = path,
+        .length_nm = (steps as f64) * pitch_nm(),
+        .live = 0,
+    };
+    list.push[Guide](&s.*.guides, g);
+    scene_mark_topo_comp(s, fc);
+    scene_mark_topo_comp(s, tc);
+    scene_mark_topo_guides(s);
+    return id;
+}
+
+// SOH matrix tiles face-adjacent to a chamber (each deepens cavity memory).
+fn scene_soh_adjacent(s: *Scene, chamber_id: i32) i32 {
+    let ci: i32 = scene_comp_index(s, chamber_id);
+    if (ci < 0) { return 0; }
+    let c: Comp = s.*.comps.data[ci];
+
+    let seen: list.ArrayList[i32] = list.make[i32](4);
+    let cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_comp(c, &cells);
+    let i: i32 = 0;
+    while (i < cells.len) {
+        let cell: Vox = cells.data[i];
+        let d: i32 = 0;
+        while (d < 4) {
+            let dir: Vox = vox(1, 0, 0);
+            if (d == 1) { dir = vox(0 - 1, 0, 0); }
+            if (d == 2) { dir = vox(0, 0, 1); }
+            if (d == 3) { dir = vox(0, 0, 0 - 1); }
+            let nb: Vox = vox_add(cell, dir);
+            let owner: i32 = scene_cell_owner(s, nb);
+            if (owner >= 0 && owner != chamber_id) {
+                let oi: i32 = scene_comp_index(s, owner);
+                if (oi >= 0) {
+                    if (s.*.comps.data[oi].kind == Kind.Soh) {
+                        let dup: bool = false;
+                        let k: i32 = 0;
+                        while (k < seen.len) {
+                            if (list.get[i32](seen, k) == owner) { dup = true; }
+                            k = k + 1;
+                        }
+                        if (!dup) { list.push[i32](&seen, owner); }
+                    }
+                }
+            }
+            d = d + 1;
+        }
+        i = i + 1;
+    }
+    let n: i32 = seen.len;
+    list.free[i32](&seen);
+    list.free[Vox](&cells);
+    return n;
+}
+
+// ── incremental sim / I/O region tracking ─────────────────────────────────────
+
+fn scene_topo_unique_push(s: *Scene, id: i32) void {
+    let i: i32 = 0;
+    while (i < s.*.topo_dirty_ids.len) {
+        if (s.*.topo_dirty_ids.data[i] == id) { return; }
+        i = i + 1;
+    }
+    list.push[i32](&s.*.topo_dirty_ids, id);
+}
+
+fn scene_mark_topo_comp(s: *Scene, id: i32) void {
+    s.*.topo_dirty = true;
+    scene_topo_unique_push(s, id);
+}
+
+fn scene_mark_topo_guides(s: *Scene) void {
+    s.*.topo_dirty = true;
+    s.*.topo_guides_dirty = true;
+}
+
+fn scene_mark_topo_full(s: *Scene) void {
+    s.*.topo_dirty = true;
+    s.*.topo_full_rebuild = true;
+    s.*.topo_guides_dirty = true;
+}
+
+fn scene_topo_clear(s: *Scene) void {
+    s.*.topo_dirty = false;
+    s.*.topo_dirty_ids.len = 0;
+    s.*.topo_guides_dirty = false;
+    s.*.topo_full_rebuild = false;
+}
+
+// Primary 32³ chunk for a component (origin voxel).
+fn scene_comp_chunk(c: Comp) ChunkCoords {
+    return world_chunk_at(c.origin);
+}
+
+fn scene_clear(s: *Scene) void {
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        list.free[Vox](&s.*.guides.data[gi].path);
+        gi = gi + 1;
+    }
+    s.*.guides.len = 0;
+    s.*.comps.len = 0;
+    hm.int_free[i32](&s.*.comp_idx);
+    s.*.comp_idx = hm.int_make[i32](64);
+    s.*.idx_dirty = true;
+    hm_clear_occ(s);
+    s.*.next_comp = 1;
+    s.*.next_guide = 1;
+    let k: i32 = 0;
+    while (k < s.*.made.len) {
+        list.set[i32](&s.*.made, k, 0);
+        k = k + 1;
+    }
+    scene_mark_topo_full(s);
+}
+
+// Re-insert a component snapshot with its exact id, size and name (undo/load).
+fn scene_restore_comp(s: *Scene, c: Comp) void {
+    let cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_comp(c, &cells);
+    let i: i32 = 0;
+    while (i < cells.len) {
+        hm_put_cell(s, cells.data[i], c.id);
+        i = i + 1;
+    }
+    list.free[Vox](&cells);
+    list.push[Comp](&s.*.comps, c);
+    s.*.idx_dirty = true;
+    if (c.id >= s.*.next_comp) { s.*.next_comp = c.id + 1; }
+    scene_mark_topo_comp(s, c.id);
+}
+
+// Re-insert a guide snapshot (takes ownership of its path).
+fn scene_restore_guide(s: *Scene, g: Guide) void {
+    list.push[Guide](&s.*.guides, g);
+    if (g.id >= s.*.next_guide) { s.*.next_guide = g.id + 1; }
+    scene_mark_topo_comp(s, g.from_c);
+    scene_mark_topo_comp(s, g.to_c);
+    scene_mark_topo_guides(s);
+}

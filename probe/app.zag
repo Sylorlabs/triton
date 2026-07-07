@@ -1,0 +1,753 @@
+// app.zag — application core: state, zones, tools, input, and the command
+// dispatch behind the menu bar and shortcuts.
+// Four-zone workspace: toolbar (left), 3D viewport (center), outliner
+// (right), signal debugger (bottom), menu bar on top, status bar underneath.
+
+@import("../std/list.zag") as list
+@import("fb.zag")
+@import("math3d.zag")
+@import("ui.zag")
+@import("voxel.zag")
+@import("components.zag")
+@import("scene.zag")
+@import("routing.zag")
+@import("sim.zag")
+@import("ternary.zag")
+@import("viewport.zag")
+@import("editops.zag")
+
+// tools
+fn tool_select() i32 { return 0; }
+fn tool_route() i32 { return 1; }
+fn tool_place_base() i32 { return 2; }   // tool = 2 + kind_index
+
+// key codes from the X11 layer
+fn key_esc() i32 { return 27; }
+fn key_del() i32 { return 127; }
+fn key_space() i32 { return 32; }
+fn key_enter() i32 { return 13; }
+fn key_backspace() i32 { return 8; }
+fn key_home() i32 { return 21; }
+
+// modal ids
+fn modal_none() i32 { return 0; }
+fn modal_open() i32 { return 1; }
+fn modal_saveas() i32 { return 2; }
+fn modal_keys() i32 { return 3; }
+
+struct App {
+    f: FB,
+    scene: *Scene,
+    sim: *Sim,
+    cam: Cam,
+    inp: Input,
+    jrn: Journal,
+    // zone splits
+    left_w: i32,
+    right_w: i32,
+    bottom_h: i32,
+    grab: i32,
+    // tools + selection
+    tool: i32,
+    ghost_rot: i32,
+    sel: list.ArrayList[i32],   // selected component ids (last = primary)
+    sel_guide: i32,
+    route_c: i32,
+    route_p: i32,
+    hover_pc: i32,
+    hover_pp: i32,
+    // ghost preview (place tool)
+    ghost_ok: i32,
+    ghost_origin: Vox,
+    // move mode (G)
+    moving: bool,
+    move_anchor: Vox,
+    move_delta: Vox,
+    move_ok: i32,
+    // status-bar cursor readout
+    hover_ok: bool,
+    hover_cell: Vox,
+    // document
+    file_: []u8,
+    dirty: bool,
+    title_dirty: bool,
+    quit: bool,
+    // menus + modals
+    menu: i32,          // -1 closed / 0 File / 1 Edit / 2 View / 3 Help
+    modal: i32,
+    modal_text: list.ArrayList[u8],
+    modal_files: list.ArrayList[[]u8],
+    modal_scroll: i32,
+    // outliner
+    expand: list.ArrayList[i32],
+    out_scroll: i32,
+    // debugger
+    speed_drag: i32,
+    // console log ring
+    log: list.ArrayList[[]u8],
+    // frame stats
+    frame: i64,
+    frame_ms: i64,
+    pmx: i32,
+    pmy: i32,
+}
+
+fn app_new(w: i32, h: i32) *App {
+    let a: *App = new(App{
+        .f = fb_new(w, h),
+        .scene = scene_new(),
+        .sim = sim_new(),
+        .cam = cam_new(),
+        .inp = input_new(),
+        .jrn = journal_new(),
+        .left_w = 224,
+        .right_w = 306,
+        .bottom_h = 236,
+        .grab = 0,
+        .tool = 0,
+        .ghost_rot = 0,
+        .sel = list.make[i32](8),
+        .sel_guide = 0 - 1,
+        .route_c = 0 - 1,
+        .route_p = 0,
+        .hover_pc = 0 - 1,
+        .hover_pp = 0,
+        .ghost_ok = 0 - 1,
+        .ghost_origin = vox(0, 0, 0),
+        .moving = false,
+        .move_anchor = vox(0, 0, 0),
+        .move_delta = vox(0, 0, 0),
+        .move_ok = 0,
+        .hover_ok = false,
+        .hover_cell = vox(0, 0, 0),
+        .file_ = "untitled.zpa",
+        .dirty = false,
+        .title_dirty = true,
+        .quit = false,
+        .menu = 0 - 1,
+        .modal = 0,
+        .modal_text = list.make[u8](32),
+        .modal_files = list.make[[]u8](8),
+        .modal_scroll = 0,
+        .expand = list.make[i32](8),
+        .out_scroll = 0,
+        .speed_drag = 0,
+        .log = list.make[[]u8](8),
+        .frame = 0,
+        .frame_ms = 0,
+        .pmx = 0,
+        .pmy = 0,
+    });
+    a.*.inp.w = w;
+    a.*.inp.h = h;
+    let i: i32 = 0;
+    while (i < 6) {
+        list.push[i32](&a.*.expand, 1);
+        i = i + 1;
+    }
+    app_log(a, "ready");
+    return a;
+}
+
+fn app_log(a: *App, msg: []u8) void {
+    if (a.*.log.len >= 5) {
+        let i: i32 = 0;
+        while (i + 1 < a.*.log.len) {
+            a.*.log.data[i] = a.*.log.data[i + 1];
+            i = i + 1;
+        }
+        a.*.log.len = a.*.log.len - 1;
+    }
+    list.push[[]u8](&a.*.log, msg);
+}
+
+fn app_mark_dirty(a: *App) void {
+    if (!a.*.dirty) {
+        a.*.dirty = true;
+        a.*.title_dirty = true;
+    }
+}
+
+// ── selection ─────────────────────────────────────────────────────────────────
+
+fn sel_clear(a: *App) void {
+    a.*.sel.len = 0;
+    a.*.sel_guide = 0 - 1;
+}
+
+fn sel_has(a: *App, id: i32) bool {
+    let i: i32 = 0;
+    while (i < a.*.sel.len) {
+        if (list.get[i32](a.*.sel, i) == id) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn sel_set(a: *App, id: i32) void {
+    a.*.sel.len = 0;
+    list.push[i32](&a.*.sel, id);
+    a.*.sel_guide = 0 - 1;
+}
+
+fn sel_toggle(a: *App, id: i32) void {
+    let i: i32 = 0;
+    while (i < a.*.sel.len) {
+        if (list.get[i32](a.*.sel, i) == id) {
+            // remove: shift left
+            let k: i32 = i;
+            while (k + 1 < a.*.sel.len) {
+                a.*.sel.data[k] = a.*.sel.data[k + 1];
+                k = k + 1;
+            }
+            a.*.sel.len = a.*.sel.len - 1;
+            return;
+        }
+        i = i + 1;
+    }
+    list.push[i32](&a.*.sel, id);
+    a.*.sel_guide = 0 - 1;
+}
+
+fn sel_primary(a: *App) i32 {
+    if (a.*.sel.len == 0) { return 0 - 1; }
+    return list.get[i32](a.*.sel, a.*.sel.len - 1);
+}
+
+// drop ids that no longer exist (after deletes/undo)
+fn sel_prune(a: *App) void {
+    let i: i32 = 0;
+    while (i < a.*.sel.len) {
+        if (scene_comp_index(a.*.scene, list.get[i32](a.*.sel, i)) < 0) {
+            let k: i32 = i;
+            while (k + 1 < a.*.sel.len) {
+                a.*.sel.data[k] = a.*.sel.data[k + 1];
+                k = k + 1;
+            }
+            a.*.sel.len = a.*.sel.len - 1;
+        } else {
+            i = i + 1;
+        }
+    }
+    if (a.*.sel_guide >= 0) {
+        if (scene_guide_index(a.*.scene, a.*.sel_guide) < 0) { a.*.sel_guide = 0 - 1; }
+    }
+}
+
+// ── zone layout ───────────────────────────────────────────────────────────────
+
+fn menu_h() i32 { return 24; }
+fn status_h() i32 { return 22; }
+
+fn zone_menu(a: *App) Rect {
+    return rect(0, 0, a.*.inp.w, menu_h());
+}
+
+fn zone_status(a: *App) Rect {
+    return rect(0, a.*.inp.h - status_h(), a.*.inp.w, status_h());
+}
+
+fn zone_bottom(a: *App) Rect {
+    return rect(0, a.*.inp.h - status_h() - a.*.bottom_h, a.*.inp.w, a.*.bottom_h);
+}
+
+fn zone_left(a: *App) Rect {
+    return rect(0, menu_h(), a.*.left_w, a.*.inp.h - menu_h() - status_h() - a.*.bottom_h);
+}
+
+fn zone_right(a: *App) Rect {
+    return rect(a.*.inp.w - a.*.right_w, menu_h(), a.*.right_w, a.*.inp.h - menu_h() - status_h() - a.*.bottom_h);
+}
+
+fn zone_center(a: *App) Rect {
+    return rect(a.*.left_w, menu_h(), a.*.inp.w - a.*.left_w - a.*.right_w, a.*.inp.h - menu_h() - status_h() - a.*.bottom_h);
+}
+
+fn app_splitters(a: *App) void {
+    let inp: *Input = &a.*.inp;
+    let zl: Rect = zone_left(a);
+    let zr: Rect = zone_right(a);
+    let zb: Rect = zone_bottom(a);
+    let grip: i32 = 5;
+    let lh: Rect = rect(zl.w - grip, zl.y, grip * 2, zl.h);
+    let rh: Rect = rect(zr.x - grip, zr.y, grip * 2, zr.h);
+    let bh: Rect = rect(0, zb.y - grip, inp.*.w, grip * 2);
+
+    if (a.*.grab == 0 && btn_pressed(inp, 0) && inp.*.capture == 0) {
+        if (rect_has(lh, inp.*.mx, inp.*.my)) { a.*.grab = 1; }
+        if (rect_has(rh, inp.*.mx, inp.*.my)) { a.*.grab = 2; }
+        if (rect_has(bh, inp.*.mx, inp.*.my)) { a.*.grab = 3; }
+    }
+    if (!btn_down(inp, 0)) { a.*.grab = 0; }
+    if (a.*.grab == 1) { a.*.left_w = clampi(inp.*.mx, 170, inp.*.w / 3); }
+    if (a.*.grab == 2) { a.*.right_w = clampi(inp.*.w - inp.*.mx, 220, (inp.*.w * 2) / 5); }
+    if (a.*.grab == 3) { a.*.bottom_h = clampi(inp.*.h - inp.*.my - status_h(), 130, (inp.*.h * 11) / 20); }
+    if (a.*.grab != 0) { inp.*.capture = 1; }
+}
+
+// ── camera framing ────────────────────────────────────────────────────────────
+
+fn app_frame_all(a: *App) void {
+    let s: *Scene = a.*.scene;
+    if (s.*.comps.len == 0) {
+        a.*.cam.target = v3(24.0, 1.0, 24.0);
+        a.*.cam.dist = 44.0;
+        return;
+    }
+    let mnx: f64 = 100000.0;
+    let mny: f64 = 100000.0;
+    let mnz: f64 = 100000.0;
+    let mxx: f64 = 0.0 - 100000.0;
+    let mxy: f64 = 0.0 - 100000.0;
+    let mxz: f64 = 0.0 - 100000.0;
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        let c: Comp = s.*.comps.data[i];
+        let lo: Vec3 = comp_bounds_min(c);
+        let hi: Vec3 = comp_bounds_max(c);
+        mnx = fmin(mnx, lo.x);
+        mny = fmin(mny, lo.y);
+        mnz = fmin(mnz, lo.z);
+        mxx = fmax(mxx, hi.x);
+        mxy = fmax(mxy, hi.y);
+        mxz = fmax(mxz, hi.z);
+        i = i + 1;
+    }
+    a.*.cam.target = v3((mnx + mxx) * 0.5, (mny + mxy) * 0.5, (mnz + mxz) * 0.5);
+    let span: f64 = fmax(mxx - mnx, fmax(mxy - mny, mxz - mnz));
+    a.*.cam.dist = clampf(span * 1.35 + 9.0, 10.0, 200.0);
+}
+
+fn app_frame_selected(a: *App) void {
+    let pid: i32 = sel_primary(a);
+    if (pid < 0) {
+        app_frame_all(a);
+        return;
+    }
+    let ci: i32 = scene_comp_index(a.*.scene, pid);
+    if (ci < 0) { return; }
+    let c: Comp = a.*.scene.*.comps.data[ci];
+    let e: Vox = comp_ext(c);
+    a.*.cam.target = v3(
+        (c.origin.x as f64) + (e.x as f64) * 0.5,
+        (c.origin.y as f64) + (e.y as f64) * 0.5,
+        (c.origin.z as f64) + (e.z as f64) * 0.5,
+    );
+    let span: i32 = imax(e.x, imax(e.y, e.z));
+    a.*.cam.dist = 6.0 + (span as f64) * 2.2;
+}
+
+// ── editing commands (menu + shortcuts share these) ───────────────────────────
+
+fn app_current_kind(a: *App) Kind {
+    return kind_at(a.*.tool - tool_place_base());
+}
+
+fn app_cancel(a: *App) void {
+    a.*.tool = tool_select();
+    a.*.route_c = 0 - 1;
+    a.*.ghost_ok = 0 - 1;
+    a.*.moving = false;
+    a.*.menu = 0 - 1;
+    a.*.modal = modal_none();
+}
+
+fn app_delete_selection(a: *App) void {
+    if (a.*.sel_guide >= 0) {
+        op_del_guide(&a.*.jrn, a.*.scene, a.*.sel_guide);
+        scene_remove_guide(a.*.scene, a.*.sel_guide);
+        a.*.sel_guide = 0 - 1;
+        app_mark_dirty(a);
+        app_log(a, "waveguide removed");
+        return;
+    }
+    let n: i32 = a.*.sel.len;
+    let i: i32 = 0;
+    while (i < n) {
+        let id: i32 = list.get[i32](a.*.sel, i);
+        op_del_comp(&a.*.jrn, a.*.scene, id);
+        scene_remove(a.*.scene, id);
+        i = i + 1;
+    }
+    if (n > 0) {
+        app_mark_dirty(a);
+        if (n == 1) { app_log(a, "1 component removed"); }
+        else { app_log(a, _zag_str_concat(_zag_i64_to_str(n as i64), " components removed")); }
+    }
+    sel_clear(a);
+}
+
+fn app_undo(a: *App) void {
+    if (journal_undo(&a.*.jrn, a.*.scene)) {
+        sel_prune(a);
+        app_mark_dirty(a);
+        app_log(a, "undo");
+    }
+}
+
+fn app_redo(a: *App) void {
+    if (journal_redo(&a.*.jrn, a.*.scene)) {
+        sel_prune(a);
+        app_mark_dirty(a);
+        app_log(a, "redo");
+    }
+}
+
+fn app_duplicate(a: *App) void {
+    let pid: i32 = sel_primary(a);
+    if (pid < 0) { return; }
+    let ci: i32 = scene_comp_index(a.*.scene, pid);
+    if (ci < 0) { return; }
+    let c: Comp = a.*.scene.*.comps.data[ci];
+    a.*.tool = tool_place_base() + kind_index(c.kind);
+    a.*.ghost_rot = c.rot;
+    app_log(a, "duplicate: click to place the copy");
+}
+
+fn app_start_move(a: *App) void {
+    if (a.*.sel.len == 0) { return; }
+    a.*.moving = true;
+    a.*.move_delta = vox(0, 0, 0);
+    // anchor at the primary component's origin
+    let ci: i32 = scene_comp_index(a.*.scene, sel_primary(a));
+    if (ci >= 0) { a.*.move_anchor = a.*.scene.*.comps.data[ci].origin; }
+}
+
+fn app_commit_move(a: *App) void {
+    if (!a.*.moving) { return; }
+    let d: Vox = a.*.move_delta;
+    if (d.x != 0 || d.z != 0) {
+        if (group_can_move(a.*.scene, &a.*.sel, d) == 0) {
+            let i: i32 = 0;
+            while (i < a.*.sel.len) {
+                op_move(&a.*.jrn, a.*.scene, list.get[i32](a.*.sel, i), d);
+                i = i + 1;
+            }
+            group_move(a.*.scene, &a.*.sel, d);
+            app_mark_dirty(a);
+            app_log(a, "moved");
+        } else {
+            app_log(a, "move blocked: destination fails placement rules");
+        }
+    }
+    a.*.moving = false;
+}
+
+fn app_new_design(a: *App) void {
+    scene_clear(a.*.scene);
+    journal_clear(&a.*.jrn);
+    sel_clear(a);
+    a.*.file_ = "untitled.zpa";
+    a.*.dirty = false;
+    a.*.title_dirty = true;
+    app_log(a, "new design");
+}
+
+fn app_save(a: *App) void {
+    if (design_save(a.*.scene, a.*.file_)) {
+        a.*.dirty = false;
+        a.*.title_dirty = true;
+        app_log(a, _zag_str_concat("saved ", a.*.file_));
+    } else {
+        app_log(a, "save failed");
+    }
+}
+
+fn app_open_file(a: *App, path: []u8) void {
+    if (design_load(a.*.scene, path)) {
+        journal_clear(&a.*.jrn);
+        sel_clear(a);
+        a.*.file_ = _zag_strdup(path);
+        a.*.dirty = false;
+        a.*.title_dirty = true;
+        app_frame_all(a);
+        app_log(a, _zag_str_concat("opened ", path));
+    } else {
+        app_log(a, _zag_str_concat("cannot open ", path));
+    }
+}
+
+fn app_show_open(a: *App) void {
+    a.*.modal = modal_open();
+    a.*.modal_scroll = 0;
+    list_designs(&a.*.modal_files);
+}
+
+fn app_show_saveas(a: *App) void {
+    a.*.modal = modal_saveas();
+    a.*.modal_text.len = 0;
+    let cur: []u8 = a.*.file_;
+    let i: i32 = 0;
+    while (i < cur.len) {
+        list.push[u8](&a.*.modal_text, cur[i]);
+        i = i + 1;
+    }
+}
+
+// ── viewport interaction ──────────────────────────────────────────────────────
+
+fn app_viewport_input(a: *App) void {
+    let inp: *Input = &a.*.inp;
+    let vp: Rect = zone_center(a);
+    let over: bool = rect_has(vp, inp.*.mx, inp.*.my) && inp.*.capture == 0;
+    a.*.ghost_ok = 0 - 1;
+    a.*.hover_pc = 0 - 1;
+    a.*.hover_ok = false;
+
+    // camera: MMB orbit / Shift+MMB pan / RMB orbit / wheel zoom
+    if (over || inp.*.capture == 2) {
+        let dragging: bool = btn_down(inp, 1) || btn_down(inp, 2);
+        if (dragging) {
+            inp.*.capture = 2;
+            let dx: f64 = (inp.*.mx - a.*.pmx) as f64;
+            let dy: f64 = (inp.*.my - a.*.pmy) as f64;
+            if (btn_down(inp, 1) && shift_down(inp)) {
+                let s: f64 = a.*.cam.dist * 0.0016;
+                let rgt: Vec3 = a.*.cam.right;
+                let up: Vec3 = a.*.cam.up;
+                let move_r: Vec3 = vscale(rgt, 0.0 - dx * s);
+                let move_u: Vec3 = vscale(up, dy * s);
+                let t0: Vec3 = vadd(a.*.cam.target, move_r);
+                a.*.cam.target = vadd(t0, move_u);
+            } else {
+                a.*.cam.yaw = a.*.cam.yaw + dx * 0.008;
+                a.*.cam.pitch = a.*.cam.pitch + dy * 0.006;
+            }
+        } else if (inp.*.capture == 2) {
+            inp.*.capture = 0;
+        }
+        if (over && inp.*.wheel != 0) {
+            let n: i32 = inp.*.wheel;
+            while (n > 0) {
+                a.*.cam.dist = a.*.cam.dist * 0.9;
+                n = n - 1;
+            }
+            while (n < 0) {
+                a.*.cam.dist = a.*.cam.dist * 1.111;
+                n = n + 1;
+            }
+        }
+    }
+    cam_update(&a.*.cam, zone_center(a).h);
+
+    if (!over || inp.*.capture == 2) { return; }
+
+    // status-bar cursor cell (at the active working level)
+    let lvl: i32 = 1;
+    if (a.*.tool >= tool_place_base()) {
+        if (kind_ground_only(app_current_kind(a))) { lvl = 0; }
+    }
+    let hov: CellHit = vp_cell_at(a.*.cam, vp, inp.*.mx, inp.*.my, lvl);
+    if (hov.ok) {
+        a.*.hover_ok = true;
+        a.*.hover_cell = hov.cell;
+    }
+
+    // move mode
+    if (a.*.moving) {
+        let mh: CellHit = vp_cell_at(a.*.cam, vp, inp.*.mx, inp.*.my, a.*.move_anchor.y);
+        if (mh.ok) {
+            a.*.move_delta = vox(mh.cell.x - a.*.move_anchor.x, 0, mh.cell.z - a.*.move_anchor.z);
+            a.*.move_ok = group_can_move(a.*.scene, &a.*.sel, a.*.move_delta);
+        }
+        if (btn_pressed(inp, 0)) { app_commit_move(a); }
+        return;
+    }
+
+    // place tools
+    if (a.*.tool >= tool_place_base()) {
+        let k: Kind = app_current_kind(a);
+        let level: i32 = 1;
+        if (kind_ground_only(k)) { level = 0; }
+        let ch: CellHit = vp_cell_at(a.*.cam, vp, inp.*.mx, inp.*.my, level);
+        if (ch.ok) {
+            let e: Vox = rot_ext(kind_fp(k), a.*.ghost_rot);
+            let origin: Vox = vox(ch.cell.x - e.x / 2, level, ch.cell.z - e.z / 2);
+            a.*.ghost_origin = origin;
+            a.*.ghost_ok = scene_can_place(a.*.scene, k, origin, a.*.ghost_rot);
+            if (btn_pressed(inp, 0)) {
+                if (a.*.ghost_ok == 0) {
+                    let id: i32 = scene_place(a.*.scene, k, origin, a.*.ghost_rot);
+                    if (id > 0) {
+                        op_add_comp(&a.*.jrn, a.*.scene, id);
+                        sel_set(a, id);
+                        app_mark_dirty(a);
+                        let ci: i32 = scene_comp_index(a.*.scene, id);
+                        app_log(a, _zag_str_concat("placed ", a.*.scene.*.comps.data[ci].name_));
+                    }
+                } else {
+                    app_log(a, _zag_str_concat("cannot place: ", place_err_text(a.*.ghost_ok)));
+                }
+            }
+        }
+        return;
+    }
+
+    // route tool
+    if (a.*.tool == tool_route()) {
+        let port: i32 = 0;
+        let pc: i32 = vp_pick_port(a.*.scene, a.*.cam, vp, inp.*.mx, inp.*.my, &port);
+        a.*.hover_pc = pc;
+        a.*.hover_pp = port;
+        if (btn_pressed(inp, 0) && pc >= 0) {
+            let ci: i32 = scene_comp_index(a.*.scene, pc);
+            let c: Comp = a.*.scene.*.comps.data[ci];
+            let p: Port = kind_port(c.kind, port);
+            if (a.*.route_c < 0) {
+                if (!p.is_output) {
+                    app_log(a, "route: start from an output port (amber)");
+                } else if (scene_port_in_use(a.*.scene, pc, port)) {
+                    app_log(a, "route: port already connected");
+                } else {
+                    a.*.route_c = pc;
+                    a.*.route_p = port;
+                    app_log(a, "route: select an input port");
+                }
+            } else {
+                if (p.is_output) {
+                    app_log(a, "route: target must be an input port");
+                } else if (scene_port_in_use(a.*.scene, pc, port)) {
+                    app_log(a, "route: input already driven");
+                } else if (pc == a.*.route_c) {
+                    app_log(a, "route: cannot loop a component to itself");
+                } else {
+                    let sci: i32 = scene_comp_index(a.*.scene, a.*.route_c);
+                    let src: Comp = a.*.scene.*.comps.data[sci];
+                    let start: Vox = comp_port_attach(src, a.*.route_p);
+                    let goal: Vox = comp_port_attach(c, port);
+                    let path: list.ArrayList[Vox] = list.make[Vox](32);
+                    if (route_guide(a.*.scene, start, goal, &path)) {
+                        let gid: i32 = scene_add_guide(a.*.scene, a.*.route_c, a.*.route_p, pc, port, path);
+                        op_add_guide(&a.*.jrn, a.*.scene, gid);
+                        a.*.sel_guide = gid;
+                        a.*.sel.len = 0;
+                        app_mark_dirty(a);
+                        app_log(a, "waveguide routed");
+                    } else {
+                        list.free[Vox](&path);
+                        app_log(a, "route: no path through the lattice");
+                    }
+                    a.*.route_c = 0 - 1;
+                }
+            }
+        }
+        return;
+    }
+
+    // select tool
+    if (btn_pressed(inp, 0)) {
+        let hit: i32 = vp_pick_comp(a.*.scene, a.*.cam, vp, inp.*.mx, inp.*.my);
+        if (hit < 0) {
+            if (!shift_down(inp)) { sel_clear(a); }
+        } else {
+            if (shift_down(inp)) { sel_toggle(a, hit); }
+            else { sel_set(a, hit); }
+        }
+    }
+}
+
+// ── keyboard ──────────────────────────────────────────────────────────────────
+
+fn ctrl_down(inp: *Input) bool {
+    return (inp.*.mods & 2) != 0;
+}
+
+fn app_keys(a: *App) void {
+    let inp: *Input = &a.*.inp;
+
+    // modal captures all typing
+    if (a.*.modal != modal_none()) {
+        app_modal_keys(a);
+        return;
+    }
+
+    if (key_hit(inp, key_esc())) {
+        if (a.*.menu >= 0) { a.*.menu = 0 - 1; }
+        else if (a.*.moving) { a.*.moving = false; }
+        else if (a.*.tool != tool_select()) { app_cancel(a); }
+        else { sel_clear(a); }
+    }
+
+    if (ctrl_down(inp)) {
+        if (key_hit(inp, 'n' as i32)) { app_new_design(a); }
+        if (key_hit(inp, 'o' as i32)) { app_show_open(a); }
+        if (key_hit(inp, 's' as i32)) {
+            if (shift_down(inp)) { app_show_saveas(a); } else { app_save(a); }
+        }
+        if (key_hit(inp, 'z' as i32)) { app_undo(a); }
+        if (key_hit(inp, 'y' as i32)) { app_redo(a); }
+        if (key_hit(inp, 'q' as i32)) { a.*.quit = true; }
+        return;
+    }
+
+    if (key_hit(inp, 'q' as i32)) { a.*.tool = tool_select(); }
+    if (key_hit(inp, 'e' as i32)) {
+        a.*.tool = tool_route();
+        a.*.route_c = 0 - 1;
+    }
+    if (key_hit(inp, 'r' as i32)) { a.*.ghost_rot = (a.*.ghost_rot + 1) % 4; }
+    if (key_hit(inp, 'x' as i32) || key_hit(inp, key_del())) { app_delete_selection(a); }
+    if (key_hit(inp, 'f' as i32)) { app_frame_selected(a); }
+    if (key_hit(inp, key_home())) { app_frame_all(a); }
+    if (key_hit(inp, 'g' as i32)) { app_start_move(a); }
+    if (key_hit(inp, 'd' as i32) && shift_down(inp)) { app_duplicate(a); }
+    if (key_hit(inp, key_space())) { a.*.sim.*.playing = !a.*.sim.*.playing; }
+    if (key_hit(inp, 't' as i32)) {
+        let pid: i32 = sel_primary(a);
+        if (pid >= 0) {
+            let ci: i32 = scene_comp_index(a.*.scene, pid);
+            if (ci >= 0) {
+                if (a.*.scene.*.comps.data[ci].kind == Kind.Emitter) {
+                    a.*.scene.*.comps.data[ci].preset = (a.*.scene.*.comps.data[ci].preset + 1) % 4;
+                    app_mark_dirty(a);
+                    app_log(a, "emitter pattern preset cycled");
+                }
+            }
+        }
+    }
+    let ki: i32 = 0;
+    while (ki < kind_count()) {
+        if (key_hit(inp, ('1' as i32) + ki)) { a.*.tool = tool_place_base() + ki; }
+        ki = ki + 1;
+    }
+}
+
+// text entry for the Save As modal
+fn app_modal_keys(a: *App) void {
+    let inp: *Input = &a.*.inp;
+    if (key_hit(inp, key_esc())) {
+        a.*.modal = modal_none();
+        return;
+    }
+    if (a.*.modal == modal_saveas()) {
+        let i: i32 = 0;
+        while (i < inp.*.keys.len) {
+            let k: i32 = list.get[i32](inp.*.keys, i);
+            if (k == key_backspace()) {
+                if (a.*.modal_text.len > 0) { a.*.modal_text.len = a.*.modal_text.len - 1; }
+            } else if (k == key_enter()) {
+                app_saveas_commit(a);
+            } else if (k >= 32 && k < 127 && a.*.modal_text.len < 60) {
+                list.push[u8](&a.*.modal_text, k as u8);
+            }
+            i = i + 1;
+        }
+    }
+}
+
+fn app_saveas_commit(a: *App) void {
+    if (a.*.modal_text.len == 0) { return; }
+    let name_: []u8 = _zag_strdup(a.*.modal_text.data[0..a.*.modal_text.len]);
+    // append .zpa when missing
+    let has_ext: bool = false;
+    if (name_.len > 4) {
+        let e: i32 = name_.len;
+        if ((name_[e - 4] as i32) == '.' && (name_[e - 3] as i32) == 'z' &&
+            (name_[e - 2] as i32) == 'p' && (name_[e - 1] as i32) == 'a') { has_ext = true; }
+    }
+    if (!has_ext) { name_ = _zag_str_concat(name_, ".zpa"); }
+    a.*.file_ = name_;
+    a.*.modal = modal_none();
+    a.*.title_dirty = true;
+    app_save(a);
+}

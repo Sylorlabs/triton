@@ -1,0 +1,84 @@
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("../src/scene.zag")
+@import("../src/routing.zag")
+@import("../src/voxel.zag")
+
+fn dbg_free(s: *Scene, cell: Vox) bool {
+    if (scene_cell_owner(s, cell) >= 0) { return false; }
+    return true;
+}
+
+fn main() i32 {
+    let s: *Scene = scene_new();
+    let _plate: i32 = scene_place(s, Kind.Plate, vox(0, 0, 0), 0);
+    let ch: i32 = scene_place(s, Kind.Chamber, vox(3, 1, 3), 0);
+    let e1: i32 = scene_place(s, Kind.Emitter, vox(0, 1, 1), 0);
+    let _e2: i32 = scene_place(s, Kind.Emitter, vox(0, 1, 5), 0);
+    let _det: i32 = scene_place(s, Kind.Detector, vox(7, 1, 4), 0);
+    let e1c: Comp = s.*.comps.data[scene_comp_index(s, e1)];
+    let chc: Comp = s.*.comps.data[scene_comp_index(s, ch)];
+    let start: Vox = comp_port_attach(e1c, 0);
+    let goal: Vox = comp_port_attach(chc, 0);
+
+    // manual 3-step path check
+    let c1: Vox = vox(2, 2, 1);
+    let c2: Vox = vox(2, 2, 2);
+    _zag_print("c1 free="); _zag_println(_zag_i64_to_str(dbg_free(s, c1) as i64));
+    _zag_print("c2 free="); _zag_println(_zag_i64_to_str(dbg_free(s, c2) as i64));
+
+    let p1: list.ArrayList[Vox] = list.make[Vox](32);
+    let ok: bool = route_guide(s, start, goal, &p1);
+    _zag_print("route ok="); _zag_println(_zag_i64_to_str(ok as i64));
+    _zag_print("path len="); _zag_println(_zag_i64_to_str(p1.len as i64));
+
+    // BFS sanity
+    let q: list.ArrayList[Vox] = list.make[Vox](64);
+    let seen: hm.Int64Map[i32] = hm.int64_make[i32](256);
+    list.push[Vox](&q, start);
+    hm.int64_put[i32](&seen, vox_key(start), 1);
+    let reached: bool = false;
+    let steps: i32 = 0;
+    let pushed: i32 = 0;
+    while (q.len > 0 && steps < 200) {
+        let cur: Vox = list.pop[Vox](&q);
+        steps = steps + 1;
+        if (vox_eq(cur, goal)) { reached = true; }
+        _zag_print("pop "); _zag_print(_zag_i64_to_str(cur.x as i64));
+        _zag_print(","); _zag_print(_zag_i64_to_str(cur.y as i64));
+        _zag_print(","); _zag_println(_zag_i64_to_str(cur.z as i64));
+        let d: i32 = 0;
+        while (d < 6) {
+            let delta: Vox = vox(0, 0, 0);
+            if (d == 0) { delta = vox(1, 0, 0); }
+            if (d == 1) { delta = vox(0 - 1, 0, 0); }
+            if (d == 2) { delta = vox(0, 0, 1); }
+            if (d == 3) { delta = vox(0, 0, 0 - 1); }
+            if (d == 4) { delta = vox(0, 1, 0); }
+            if (d == 5) { delta = vox(0, 0 - 1, 0); }
+            let nb: Vox = vox_add(cur, delta);
+            if (nb.y < 1 || nb.y > 12) { d = d + 1; }
+            else {
+                let sk: i64 = vox_key(nb);
+                let had: ?i32 = hm.int64_get[i32](seen, sk);
+                let free: bool = dbg_free(s, nb);
+                _zag_print("  nb "); _zag_print(_zag_i64_to_str(nb.x as i64));
+                _zag_print(" had="); _zag_print(_zag_i64_to_str((had != null) as i64));
+                _zag_print(" free="); _zag_println(_zag_i64_to_str(free as i64));
+                if (had == null) {
+                    if (vox_eq(nb, goal) || free) {
+                        hm.int64_put[i32](&seen, sk, 1);
+                        list.push[Vox](&q, nb);
+                        pushed = pushed + 1;
+                    }
+                }
+                d = d + 1;
+            }
+        }
+    }
+    _zag_print("bfs pushed="); _zag_println(_zag_i64_to_str(pushed as i64));
+    _zag_print("bfs reached="); _zag_println(_zag_i64_to_str(reached as i64));
+    hm.int64_free[i32](&seen);
+    list.free[Vox](&q);
+    return 0;
+}

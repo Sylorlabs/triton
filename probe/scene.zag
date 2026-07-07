@@ -1,0 +1,121 @@
+// scene.zag — the design database. The scene is stored as (a) a voxel
+// occupancy lattice for snapping and design-rule checks and (b) a directed
+// graph of optical flow: component ports connected by routed waveguides.
+// Viewport meshes are derived from this, never authoritative.
+
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("voxel.zag")
+@import("components.zag")
+
+fn max_chambers_per_plate() i32 { return 64; }
+
+struct Comp {
+    id: i32,
+    kind: Kind,
+    origin: Vox,   // min-corner voxel
+    rot: i32,      // quarter turns about +Y
+    visible: bool,
+    wl_nm: f64,    // WDM channel (emitters)
+    preset: i32,   // emitter symbol-pattern preset
+    name_: []u8,
+}
+
+struct Guide {
+    id: i32,
+    from_c: i32,   // source component id (output port owner)
+    from_p: i32,
+    to_c: i32,     // sink component id (input port owner)
+    to_p: i32,
+    path: list.ArrayList[Vox],   // attach cell .. attach cell, 6-connected
+    length_nm: f64,
+    live: i32,     // trit currently arriving at the sink (viewport coloring)
+}
+
+struct Scene {
+    comps: list.ArrayList[Comp],
+    guides: list.ArrayList[Guide],
+    occ: hm.Int64Map[i32],          // vox_key -> component id
+    next_comp: i32,
+    next_guide: i32,
+    made: list.ArrayList[i32],      // per-kind naming counters
+    topo_dirty: bool,               // optical topology changed -> sim recompiles
+}
+
+fn scene_new() *Scene {
+    let s: *Scene = new(Scene{
+        .comps = list.make[Comp](32),
+        .guides = list.make[Guide](16),
+        .occ = hm.int64_make[i32](512),
+        .next_comp = 1,
+        .next_guide = 1,
+        .made = list.make[i32](8),
+        .topo_dirty = true,
+    });
+    let i: i32 = 0;
+    while (i < kind_count()) {
+        list.push[i32](&s.*.made, 0);
+        i = i + 1;
+    }
+    return s;
+}
+
+// ── component geometry ────────────────────────────────────────────────────────
+
+fn comp_ext(c: Comp) Vox {
+    let fp: Vox = kind_fp(c.kind);
+    return rot_ext(fp, c.rot);
+}
+
+// World voxel of a footprint-local (unrotated) offset.
+fn comp_l2w(c: Comp, p: Vox) Vox {
+    let fp: Vox = kind_fp(c.kind);
+    let r: Vox = rot_local(p, fp, c.rot);
+    return vox_add(c.origin, r);
+}
+
+// World cell owning port i.
+fn comp_port_cell(c: Comp, i: i32) Vox {
+    let p: Port = kind_port(c.kind, i);
+    return comp_l2w(c, p.cell);
+}
+
+// World face normal of port i.
+fn comp_port_dir(c: Comp, i: i32) Vox {
+    let p: Port = kind_port(c.kind, i);
+    return rot_dir(p.out, c.rot);
+}
+
+// World cell a waveguide attaches to for port i (one voxel out from the face).
+fn comp_port_attach(c: Comp, i: i32) Vox {
+    let cell: Vox = comp_port_cell(c, i);
+    let d: Vox = comp_port_dir(c, i);
+    return vox_add(cell, d);
+}
+
+// ── lookups ───────────────────────────────────────────────────────────────────
+
+fn scene_comp_index(s: *Scene, id: i32) i32 {
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        if (s.*.comps.data[i].id == id) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+fn scene_guide_index(s: *Scene, id: i32) i32 {
+    let i: i32 = 0;
+    while (i < s.*.guides.len) {
+        if (s.*.guides.data[i].id == id) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// Component id occupying a voxel, or -1.
+fn scene_cell_owner(s: *Scene, v: Vox) i32 {
+    let got: ?i32 = hm.int64_get[i32](s.*.occ, vox_key(v));
+    return got orelse (0 - 1);
+}
+... 271 lines not shown ...

@@ -1,0 +1,48 @@
+// demo.zag — reference photonic processor design (shared by GUI + agent).
+
+@import("../std/list.zag") as list
+@import("app.zag")
+@import("editops.zag")
+@import("routing.zag")
+
+fn demo_route(s: *Scene, fc: i32, fp: i32, tc: i32, tp: i32) void {
+    if (fc < 0 || tc < 0) { return; }
+    let fi: i32 = scene_comp_index(s, fc);
+    let ti: i32 = scene_comp_index(s, tc);
+    if (fi < 0 || ti < 0) { return; }
+    let src: Comp = s.*.comps.data[fi];
+    let dst: Comp = s.*.comps.data[ti];
+    let start: Vox = comp_port_attach(src, fp);
+    let goal: Vox = comp_port_attach(dst, tp);
+    let path: list.ArrayList[Vox] = list.make[Vox](32);
+    if (route_guide(s, start, goal, &path)) {
+        let _gid: i32 = scene_add_guide(s, fc, fp, tc, tp, path);
+    } else {
+        list.free[Vox](&path);
+    }
+}
+
+fn demo_load(a: *App) void {
+    let s: *Scene = a.*.scene;
+    scene_clear(s);
+    journal_clear(&a.*.jrn);
+    sel_clear(a);
+    let pa: i32 = scene_place(s, Kind.Plate, vox(6, 0, 10), 0);
+    let _pb: i32 = scene_place(s, Kind.Plate, vox(20, 0, 10), 0);
+    if (pa < 0) { return; }
+    let e1: i32 = scene_place(s, Kind.Emitter, vox(7, 1, 12), 0);
+    let e2: i32 = scene_place(s, Kind.Emitter, vox(7, 1, 15), 0);
+    let e3: i32 = scene_place(s, Kind.Emitter, vox(7, 1, 17), 0);
+    let ch1: i32 = scene_place(s, Kind.Chamber, vox(11, 1, 13), 0);
+    let _soh: i32 = scene_place(s, Kind.Soh, vox(11, 1, 15), 0);
+    let ch2: i32 = scene_place(s, Kind.Chamber, vox(21, 1, 15), 0);
+    let d1: i32 = scene_place(s, Kind.Detector, vox(24, 1, 14), 0);
+    let d2: i32 = scene_place(s, Kind.Detector, vox(26, 1, 12), 0);
+    demo_route(s, e1, 0, ch1, 0);
+    demo_route(s, e2, 0, ch1, 1);
+    demo_route(s, ch1, 3, d1, 0);
+    demo_route(s, e3, 0, ch2, 1);
+    demo_route(s, ch2, 3, d2, 0);
+    app_frame_all(a);
+    app_mark_dirty(a);
+}

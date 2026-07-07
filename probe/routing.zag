@@ -1,0 +1,41 @@
+// routing.zag — waveguide routing engine. A* over the free voxel lattice,
+// 6-connected, with a bend penalty so routes prefer long straight optical
+// runs (every bend in a real waveguide is an insertion-loss event).
+
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("voxel.zag")
+@import("scene.zag")
+
+fn step_cost() i32 { return 10; }
+fn bend_cost() i32 { return 40; }
+fn layer_min() i32 { return 1; }    // guides never tunnel through the substrate
+fn layer_max() i32 { return 12; }
+fn route_margin() i32 { return 6; } // search window padding around endpoints
+
+struct RNode {
+    cell: Vox,
+    dir: i32,     // incoming direction 0..5, 6 = none (start)
+    g: i32,
+    f: i32,
+    parent: i32,  // pool index of predecessor, -1 for start
+    open: bool,
+}
+
+fn r_min(a: i32, b: i32) i32 {
+    if (a < b) { return a; }
+    return b;
+}
+
+fn r_max(a: i32, b: i32) i32 {
+    if (a > b) { return a; }
+    return b;
+}
+
+fn r_dir(d: i32) Vox {
+    if (d == 0) { return vox(1, 0, 0); }
+    if (d == 1) { return vox(0 - 1, 0, 0); }
+    if (d == 2) { return vox(0, 0, 1); }
+    if (d == 3) { return vox(0, 0, 0 - 1); }
+    if (d == 4) { return vox(0, 1, 0); }
+... 138 lines not shown ...

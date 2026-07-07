@@ -1,0 +1,14 @@
+zagpa
+zagpa.new
+.triton/
+untitled.zpa
+*.new
+probe/engine_test
+probe/saveload_test
+probe/hm_dbg
+probe/move_dbg
+probe/x11_pixel_pack_test
+probe/*.bmp
+!probe/smoke_app.bmp
+.cursor/
+tools/__pycache__/

@@ -1,0 +1,13 @@
+# Example agent script — run with: ./zagctl run examples/agent_demo.tcmd
+new
+place plate 0 0 0 0
+place emitter 1 1 2 0
+place chamber 4 1 3 0
+place detector 7 1 4 0
+route 2 0 3 0
+route 3 3 4 0
+sim step 16
+sim state
+save /tmp/agent_demo.zpa
+render /tmp/agent_demo.bmp
+list

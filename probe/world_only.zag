@@ -1,0 +1,7 @@
+@import("../src/world.zag")
+
+fn main() i32 {
+    let w: *World = world_new();
+    world_free(w);
+    return 0;
+}

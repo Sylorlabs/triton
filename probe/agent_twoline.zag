@@ -1,0 +1,12 @@
+@import("../src/app.zag")
+@import("../src/scene.zag")
+
+fn main() i32 {
+    let a: *App = app_new(64, 64);
+    app_new_design(a);
+    let p1: i32 = scene_place(a.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    _zag_println(_zag_i64_to_str(p1 as i64));
+    let p2: i32 = scene_place(a.*.scene, Kind.Emitter, vox(1, 1, 2), 0);
+    _zag_println(_zag_i64_to_str(p2 as i64));
+    return 0;
+}

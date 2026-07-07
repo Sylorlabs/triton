@@ -1,0 +1,212 @@
+// world.zag — sparse chunk-based spatial index for million-scale scenes.
+// Each 32x32x32 voxel chunk tracks local occupancy and the component ids
+// touching it. Scene mutations keep this in sync via hm_put_cell/hm_del_cell.
+
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("voxel.zag")
+
+fn chunk_cells() i32 { return 32; }
+
+struct ChunkCoords {
+    cx: i32,
+    cy: i32,
+    cz: i32,
+}
+
+struct Chunk {
+    occ: hm.Int64Map[i32],         // local cell key -> component id
+    comp_refs: hm.IntMap[i32],     // component id -> voxel count in chunk
+    comps: list.ArrayList[i32],    // unique component ids touching chunk
+}
+
+struct World {
+    chunk_idx: hm.Int64Map[i32],       // packed chunk coords -> all_chunks index
+    all_chunks: list.ArrayList[*Chunk],
+}
+
+fn idiv_floor(v: i32, d: i32) i32 {
+    let q: i32 = v / d;
+    if (v < 0 && v != q * d) {
+        q = q - 1;
+    }
+    return q;
+}
+
+fn chunk_key_pack(cc: ChunkCoords) i64 {
+    let x: i64 = (cc.cx + 128) as i64;
+    let y: i64 = (cc.cy + 128) as i64;
+    let z: i64 = (cc.cz + 128) as i64;
+    return x + y * 256 + z * 65536;
+}
+
+fn world_chunk_at(v: Vox) ChunkCoords {
+    let d: i32 = chunk_cells();
+    return ChunkCoords{
+        .cx = idiv_floor(v.x, d),
+        .cy = idiv_floor(v.y, d),
+        .cz = idiv_floor(v.z, d),
+    };
+}
+
+fn local_vox_key(v: Vox, cc: ChunkCoords) i64 {
+    let d: i32 = chunk_cells();
+    let lx: i64 = (v.x - cc.cx * d) as i64;
+    let ly: i64 = (v.y - cc.cy * d) as i64;
+    let lz: i64 = (v.z - cc.cz * d) as i64;
+    return lx + ly * 32 + lz * 1024;
+}
+
+fn chunk_new() *Chunk {
+    return new(Chunk{
+        .occ = hm.int64_make[i32](64),
+        .comp_refs = hm.int_make[i32](8),
+        .comps = list.make[i32](4),
+    });
+}
+
+fn chunk_free(ch: *Chunk) void {
+    hm.int64_free[i32](&ch.*.occ);
+    hm.int_free[i32](&ch.*.comp_refs);
+    list.free[i32](&ch.*.comps);
+    _zag_free(ch as *i8);
+}
+
+fn world_new() *World {
+    return new(World{
+        .chunk_idx = hm.int64_make[i32](64),
+        .all_chunks = list.make[*Chunk](32),
+    });
+}
+
+fn world_chunk_index(w: *World, cc: ChunkCoords) i32 {
+    let got: ?i32 = hm.int64_get[i32](w.*.chunk_idx, chunk_key_pack(cc));
+    return got orelse (0 - 1);
+}
+
+fn world_chunk_ptr(w: *World, idx: i32) *Chunk {
+    return w.*.all_chunks.data[idx];
+}
+
+fn world_alloc_chunk(w: *World, cc: ChunkCoords) *Chunk {
+    let ch: *Chunk = chunk_new();
+    let idx: i32 = w.*.all_chunks.len;
+    list.push[*Chunk](&w.*.all_chunks, ch);
+    hm.int64_put[i32](&w.*.chunk_idx, chunk_key_pack(cc), idx);
+    return ch;
+}
+
+fn world_ensure_chunk(w: *World, cc: ChunkCoords) *Chunk {
+    let idx: i32 = world_chunk_index(w, cc);
+    if (idx >= 0) { return world_chunk_ptr(w, idx); }
+    return world_alloc_chunk(w, cc);
+}
+
+fn chunk_drop_comp(ch: *Chunk, comp_id: i32) void {
+    let _d: bool = hm.int_del[i32](&ch.*.comp_refs, comp_id);
+    let i: i32 = 0;
+    while (i < ch.*.comps.len) {
+        if (ch.*.comps.data[i] == comp_id) {
+            let last: i32 = ch.*.comps.len - 1;
+            ch.*.comps.data[i] = ch.*.comps.data[last];
+            ch.*.comps.len = ch.*.comps.len - 1;
+        } else {
+            i = i + 1;
+        }
+    }
+}
+
+fn world_touch_vox(w: *World, v: Vox, comp_id: i32) void {
+    let cc: ChunkCoords = world_chunk_at(v);
+    let ch: *Chunk = world_ensure_chunk(w, cc);
+    let lk: i64 = local_vox_key(v, cc);
+    hm.int64_put[i32](&ch.*.occ, lk, comp_id);
+    let prev_n: i32 = hm.int_get[i32](ch.*.comp_refs, comp_id) orelse 0;
+    let n: i32 = prev_n + 1;
+    hm.int_put[i32](&ch.*.comp_refs, comp_id, n);
+    if (prev_n == 0) {
+        list.push[i32](&ch.*.comps, comp_id);
+    }
+}
+
+fn world_remove_vox(w: *World, v: Vox, comp_id: i32) void {
+    let cc: ChunkCoords = world_chunk_at(v);
+    let idx: i32 = world_chunk_index(w, cc);
+    if (idx < 0) { return; }
+    let ch: *Chunk = world_chunk_ptr(w, idx);
+    let lk: i64 = local_vox_key(v, cc);
+    let had: i32 = hm.int64_get[i32](ch.*.occ, lk) orelse (0 - 1);
+    if (had < 0) { return; }
+    let _gone: bool = hm.del[i64, i32](&ch.*.occ.inner, lk);
+    let prev_n: i32 = hm.int_get[i32](ch.*.comp_refs, comp_id) orelse 0;
+    if (prev_n > 0) {
+        let n: i32 = prev_n - 1;
+        if (n <= 0) {
+            chunk_drop_comp(ch, comp_id);
+        } else {
+            hm.int_put[i32](&ch.*.comp_refs, comp_id, n);
+        }
+    }
+}
+
+fn query_has_id(out: *list.ArrayList[i32], id: i32) bool {
+    let i: i32 = 0;
+    while (i < out.*.len) {
+        if (out.*.data[i] == id) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn query_push_unique(out: *list.ArrayList[i32], id: i32) void {
+    if (!query_has_id(out, id)) {
+        list.push[i32](out, id);
+    }
+}
+
+// Collect unique component ids from every chunk overlapping [vmin, vmax].
+fn world_query_aabb(w: *World, vmin: Vox, vmax: Vox, out: *list.ArrayList[i32]) void {
+    out.*.len = 0;
+    let cmin: ChunkCoords = world_chunk_at(vmin);
+    let cmax: ChunkCoords = world_chunk_at(vmax);
+    let cx: i32 = cmin.cx;
+    while (cx <= cmax.cx) {
+        let cy: i32 = cmin.cy;
+        while (cy <= cmax.cy) {
+            let cz: i32 = cmin.cz;
+            while (cz <= cmax.cz) {
+                let cc: ChunkCoords = ChunkCoords{ .cx = cx, .cy = cy, .cz = cz };
+                let idx: i32 = world_chunk_index(w, cc);
+                if (idx >= 0) {
+                    let ch: *Chunk = world_chunk_ptr(w, idx);
+                    let i: i32 = 0;
+                    while (i < ch.*.comps.len) {
+                        query_push_unique(out, ch.*.comps.data[i]);
+                        i = i + 1;
+                    }
+                }
+                cz = cz + 1;
+            }
+            cy = cy + 1;
+        }
+        cx = cx + 1;
+    }
+}
+
+fn world_clear(w: *World) void {
+    let i: i32 = 0;
+    while (i < w.*.all_chunks.len) {
+        chunk_free(w.*.all_chunks.data[i]);
+        i = i + 1;
+    }
+    w.*.all_chunks.len = 0;
+    hm.int64_free[i32](&w.*.chunk_idx);
+    w.*.chunk_idx = hm.int64_make[i32](64);
+}
+
+fn world_free(w: *World) void {
+    world_clear(w);
+    list.free[*Chunk](&w.*.all_chunks);
+    hm.int64_free[i32](&w.*.chunk_idx);
+    _zag_free(w as *i8);
+}

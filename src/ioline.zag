@@ -1,0 +1,72 @@
+// ioline.zag — buffered stdin reads (chunked, not byte-per-syscall).
+
+@import("../std/list.zag") as list
+
+extern fn _zag_read_fd(fd: i64, buf: *i8, n: i64) i64;
+
+struct IoBuf {
+    chunk: list.ArrayList[u8],
+    pos: i32,
+    fill: i32,
+    eof: bool,
+}
+
+fn iobuf_new() IoBuf {
+    return IoBuf{
+        .chunk = list.make[u8](4096),
+        .pos = 0,
+        .fill = 0,
+        .eof = false,
+    };
+}
+
+fn iobuf_refill(b: *IoBuf, fd: i64) bool {
+    if (b.*.eof) { return false; }
+    b.*.pos = 0;
+    b.*.fill = 0;
+    let n: i64 = _zag_read_fd(fd, b.*.chunk.data as *i8, b.*.chunk.cap as i64);
+    if (n <= 0) {
+        b.*.eof = true;
+        return false;
+    }
+    b.*.fill = n as i32;
+    return true;
+}
+
+fn iobuf_next(b: *IoBuf, fd: i64) i32 {
+    if (b.*.pos >= b.*.fill) {
+        if (!iobuf_refill(b, fd)) { return 0 - 1; }
+    }
+    let c: i32 = b.*.chunk.data[b.*.pos] as i32;
+    b.*.pos = b.*.pos + 1;
+    return c;
+}
+
+fn iobuf_read_n(b: *IoBuf, fd: i64, out: *list.ArrayList[u8], n: i32) bool {
+    let want: i32 = n;
+    while (want > 0) {
+        let c: i32 = iobuf_next(b, fd);
+        if (c < 0) { return false; }
+        list.push[u8](out, c as u8);
+        want = want - 1;
+    }
+    return true;
+}
+
+fn ioline_read(b: *IoBuf, fd: i64, out: *list.ArrayList[u8]) bool {
+    out.*.len = 0;
+    let running: bool = true;
+    while (running) {
+        let c: i32 = iobuf_next(b, fd);
+        if (c < 0) {
+            return out.*.len > 0;
+        }
+        if (c == 10) { return true; }
+        list.push[u8](out, c as u8);
+    }
+    return false;
+}
+
+fn iobuf_free(b: *IoBuf) void {
+    list.free[u8](&b.*.chunk);
+}

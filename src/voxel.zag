@@ -1,0 +1,63 @@
+// voxel.zag — integer lattice coordinates for the design grid.
+// One voxel = 250 nm of GeSn substrate pitch. Coordinate range -2048..2047.
+
+struct Vox {
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+fn vox(x: i32, y: i32, z: i32) Vox {
+    return Vox{ .x = x, .y = y, .z = z };
+}
+
+fn vox_add(a: Vox, b: Vox) Vox {
+    return vox(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+
+fn vox_eq(a: Vox, b: Vox) bool {
+    return a.x == b.x && a.y == b.y && a.z == b.z;
+}
+
+fn vox_manhattan(a: Vox, b: Vox) i32 {
+    let dx: i32 = a.x - b.x;
+    if (dx < 0) { dx = 0 - dx; }
+    let dy: i32 = a.y - b.y;
+    if (dy < 0) { dy = 0 - dy; }
+    let dz: i32 = a.z - b.z;
+    if (dz < 0) { dz = 0 - dz; }
+    return dx + dy + dz;
+}
+
+// Pack into a unique i64 occupancy key (each axis biased into 0..4095).
+fn vox_key(v: Vox) i64 {
+    let x: i64 = (v.x + 2048) as i64;
+    let y: i64 = (v.y + 2048) as i64;
+    let z: i64 = (v.z + 2048) as i64;
+    return x + y * 4096 + z * 16777216;
+}
+
+// ── quarter-turn rotation about +Y ───────────────────────────────────────────
+// `fp` is the unrotated footprint extent; local offsets stay inside it.
+
+fn rot_local(p: Vox, fp: Vox, rot: i32) Vox {
+    let r: i32 = rot % 4;
+    if (r == 1) { return vox(fp.z - 1 - p.z, p.y, p.x); }
+    if (r == 2) { return vox(fp.x - 1 - p.x, p.y, fp.z - 1 - p.z); }
+    if (r == 3) { return vox(p.z, p.y, fp.x - 1 - p.x); }
+    return p;
+}
+
+fn rot_dir(d: Vox, rot: i32) Vox {
+    let r: i32 = rot % 4;
+    if (r == 1) { return vox(0 - d.z, d.y, d.x); }
+    if (r == 2) { return vox(0 - d.x, d.y, 0 - d.z); }
+    if (r == 3) { return vox(d.z, d.y, 0 - d.x); }
+    return d;
+}
+
+fn rot_ext(fp: Vox, rot: i32) Vox {
+    let r: i32 = rot % 4;
+    if (r == 1 || r == 3) { return vox(fp.z, fp.y, fp.x); }
+    return fp;
+}

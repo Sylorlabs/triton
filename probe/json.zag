@@ -1,0 +1,81 @@
+// selfhost/lsp/json.zag — minimal JSON builder + naive field extractor.
+//
+// No full JSON parser needed: we build responses with string concat and
+// extract request fields with simple byte-scanning heuristics.
+
+@import("../../std/list.zag")
+@import("../../std/rt.zag")
+
+// ── JSON builder ──────────────────────────────────────────────────────────────
+
+// Escape a string for use as a JSON string value: wrap in quotes,
+// escape backslash and double-quote.
+fn json_str(s: []u8) []u8 {
+    let out: ArrayList[u8] = make[u8](s.len + 4);
+    push[u8](&out, 34);         // opening "
+    let i: i32 = 0;
+    while (i < s.len) {
+        let c: u8 = s[i];
+        if (c == 92) {          // backslash → \\
+            push[u8](&out, 92);
+            push[u8](&out, 92);
+        } else if (c == 34) {  // double-quote → \"
+            push[u8](&out, 92);
+            push[u8](&out, 34);
+        } else {
+            push[u8](&out, c);
+        }
+        i = i + 1;
+    }
+    push[u8](&out, 34);         // closing "
+    return out.data[0..out.len];
+}
+
+// Integer as JSON number string.
+fn json_int(v: i32) []u8 { return _zag_i64_to_str(v as i64); }
+
+// Boolean as JSON literal.
+fn json_bool(v: i32) []u8 {
+    if (v != 0) { return "true"; }
+    return "false";
+}
+
+// Build {"k0":v0,"k1":v1,...} from a flat list of alternating key/value strings.
+// items length must be even.
+fn json_obj(items: ArrayList[[]u8]) []u8 {
+    let out: ArrayList[u8] = make[u8](128);
+    push[u8](&out, 123);   // {
+    let i: i32 = 0;
+    while (i + 1 < len[[]u8](items)) {
+        if (i > 0) { push[u8](&out, 44); }  // ,
+        // key (already a JSON string)
+        let k: []u8 = get[[]u8](items, i);
+        let ki: i32 = 0;
+        while (ki < k.len) { push[u8](&out, k[ki]); ki = ki + 1; }
+        push[u8](&out, 58);   // :
+        // value
+        let v: []u8 = get[[]u8](items, i + 1);
+        let vi: i32 = 0;
+        while (vi < v.len) { push[u8](&out, v[vi]); vi = vi + 1; }
+        i = i + 2;
+    }
+    push[u8](&out, 125);   // }
+    return out.data[0..out.len];
+}
+
+// Build [v0,v1,...] from a list of value strings.
+fn json_arr(items: ArrayList[[]u8]) []u8 {
+    let out: ArrayList[u8] = make[u8](64);
+    push[u8](&out, 91);   // [
+    let i: i32 = 0;
+    while (i < len[[]u8](items)) {
+        if (i > 0) { push[u8](&out, 44); }   // ,
+        let v: []u8 = get[[]u8](items, i);
+        let vi: i32 = 0;
+        while (vi < v.len) { push[u8](&out, v[vi]); vi = vi + 1; }
+        i = i + 1;
+    }
+    push[u8](&out, 93);   // ]
+    return out.data[0..out.len];
+}
+... 109 lines not shown ...

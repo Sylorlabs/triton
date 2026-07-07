@@ -1,0 +1,893 @@
+// editops.zag — editing operations above the raw scene: move with waveguide
+// re-routing, duplicate support, the undo/redo journal, and .zpa design files.
+
+@import("../std/list.zag") as list
+@import("voxel.zag")
+@import("components.zag")
+@import("scene.zag")
+@import("routing.zag")
+
+// ── guide snapshots ───────────────────────────────────────────────────────────
+
+fn guide_clone(g: Guide) Guide {
+    let p: list.ArrayList[Vox] = list.make[Vox](g.path.len + 1);
+    let i: i32 = 0;
+    while (i < g.path.len) {
+        list.push[Vox](&p, list.get[Vox](g.path, i));
+        i = i + 1;
+    }
+    return Guide{
+        .id = g.id,
+        .from_c = g.from_c, .from_p = g.from_p,
+        .to_c = g.to_c, .to_p = g.to_p,
+        .path = p,
+        .length_nm = g.length_nm,
+        .live = 0,
+    };
+}
+
+// snapshot every guide touching component `id` into `out`
+fn snapshot_incident(s: *Scene, id: i32, out: *list.ArrayList[Guide]) void {
+    let i: i32 = 0;
+    while (i < s.*.guides.len) {
+        let g: Guide = s.*.guides.data[i];
+        if (g.from_c == id || g.to_c == id) {
+            list.push[Guide](out, guide_clone(g));
+        }
+        i = i + 1;
+    }
+}
+
+// ── move with re-route ────────────────────────────────────────────────────────
+
+// Can every component in `ids` shift by `delta` (own cells ignored)?
+// Returns 0 ok / DRC code of the first failure.
+fn group_can_move(s: *Scene, ids: *list.ArrayList[i32], delta: Vox) i32 {
+    // unmark all moving footprints
+    unmark_group(s, ids);
+    let verdict: i32 = 0;
+    let i: i32 = 0;
+    while (i < ids.*.len && verdict == 0) {
+        let ci: i32 = scene_comp_index(s, list.get[i32](ids.*, i));
+        if (ci >= 0) {
+            let c: Comp = s.*.comps.data[ci];
+            let no: Vox = vox_add(c.origin, delta);
+            verdict = scene_can_place(s, c.kind, no, c.rot);
+        }
+        i = i + 1;
+    }
+    mark_group(s, ids);
+    return verdict;
+}
+
+fn unmark_group(s: *Scene, ids: *list.ArrayList[i32]) void {
+    let i: i32 = 0;
+    while (i < ids.*.len) {
+        let ci: i32 = scene_comp_index(s, list.get[i32](ids.*, i));
+        if (ci >= 0) {
+            let c: Comp = s.*.comps.data[ci];
+            let cells: list.ArrayList[Vox] = list.make[Vox](8);
+            scene_cells_of(c.kind, c.origin, c.rot, &cells);
+            let k: i32 = 0;
+            while (k < cells.len) {
+                hm_del_cell(s, cells.data[k]);
+                k = k + 1;
+            }
+            list.free[Vox](&cells);
+        }
+        i = i + 1;
+    }
+}
+
+fn mark_group(s: *Scene, ids: *list.ArrayList[i32]) void {
+    let i: i32 = 0;
+    while (i < ids.*.len) {
+        let ci: i32 = scene_comp_index(s, list.get[i32](ids.*, i));
+        if (ci >= 0) {
+            let c: Comp = s.*.comps.data[ci];
+            let cells: list.ArrayList[Vox] = list.make[Vox](8);
+            scene_cells_of(c.kind, c.origin, c.rot, &cells);
+            let k: i32 = 0;
+            while (k < cells.len) {
+                hm_put_cell(s, cells.data[k], c.id);
+                k = k + 1;
+            }
+            list.free[Vox](&cells);
+        }
+        i = i + 1;
+    }
+}
+
+// Commit a group move; re-routes every incident waveguide (guides whose path
+// can no longer be routed are dropped). Caller has verified group_can_move.
+fn group_move(s: *Scene, ids: *list.ArrayList[i32], delta: Vox) void {
+    unmark_group(s, ids);
+    let i: i32 = 0;
+    while (i < ids.*.len) {
+        let ci: i32 = scene_comp_index(s, list.get[i32](ids.*, i));
+        if (ci >= 0) {
+            s.*.comps.data[ci].origin = vox_add(s.*.comps.data[ci].origin, delta);
+        }
+        i = i + 1;
+    }
+    mark_group(s, ids);
+    reroute_incident(s, ids);
+    s.*.topo_dirty = true;
+}
+
+fn reroute_incident(s: *Scene, ids: *list.ArrayList[i32]) void {
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        let g: Guide = s.*.guides.data[gi];
+        let touched: bool = false;
+        let k: i32 = 0;
+        while (k < ids.*.len) {
+            let id: i32 = list.get[i32](ids.*, k);
+            if (g.from_c == id || g.to_c == id) { touched = true; }
+            k = k + 1;
+        }
+        if (touched) {
+            let fi: i32 = scene_comp_index(s, g.from_c);
+            let ti: i32 = scene_comp_index(s, g.to_c);
+            let done: bool = false;
+            if (fi >= 0 && ti >= 0) {
+                let src: Comp = s.*.comps.data[fi];
+                let dst: Comp = s.*.comps.data[ti];
+                let start: Vox = comp_port_attach(src, g.from_p);
+                let goal: Vox = comp_port_attach(dst, g.to_p);
+                let np: list.ArrayList[Vox] = list.make[Vox](32);
+                if (route_guide(s, start, goal, &np)) {
+                    list.free[Vox](&s.*.guides.data[gi].path);
+                    s.*.guides.data[gi].path = np;
+                    let steps: i32 = np.len - 1;
+                    if (steps < 0) { steps = 0; }
+                    s.*.guides.data[gi].length_nm = (steps as f64) * pitch_nm();
+                    done = true;
+                } else {
+                    list.free[Vox](&np);
+                }
+            }
+            if (!done) {
+                scene_remove_guide_at(s, gi);
+                gi = gi - 1;   // list shifted left
+            }
+        }
+        gi = gi + 1;
+    }
+}
+
+// ── undo / redo journal ───────────────────────────────────────────────────────
+// op kinds: 1 add-comp, 2 del-comp, 3 add-guide, 4 del-guide, 5 move
+
+struct UOp {
+    kind: i32,
+    comp: Comp,                        // snapshot (1/2/5)
+    old_origin: Vox,                   // 5
+    new_origin: Vox,                   // 5
+    guides: list.ArrayList[Guide],     // cascaded/incident snapshots (2/5)
+    guide: Guide,                      // 3/4
+    has_guide: bool,
+}
+
+struct Journal {
+    undo: list.ArrayList[UOp],
+    redo: list.ArrayList[UOp],
+}
+
+fn journal_new() Journal {
+    return Journal{
+        .undo = list.make[UOp](16),
+        .redo = list.make[UOp](16),
+    };
+}
+
+fn uop_empty() UOp {
+    let g: Guide = Guide{
+        .id = 0, .from_c = 0, .from_p = 0, .to_c = 0, .to_p = 0,
+        .path = list.make[Vox](1), .length_nm = 0.0, .live = 0,
+    };
+    let c: Comp = Comp{
+        .id = 0, .kind = Kind.Plate, .origin = vox(0, 0, 0), .rot = 0,
+        .size = kind_fp(Kind.Plate),
+        .visible = true, .wl_nm = 0.0, .preset = 0, .name_ = "",
+    };
+    return UOp{
+        .kind = 0, .comp = c,
+        .old_origin = vox(0, 0, 0), .new_origin = vox(0, 0, 0),
+        .guides = list.make[Guide](1),
+        .guide = g, .has_guide = false,
+    };
+}
+
+fn uop_free(op: *UOp) void {
+    let i: i32 = 0;
+    while (i < op.*.guides.len) {
+        list.free[Vox](&op.*.guides.data[i].path);
+        i = i + 1;
+    }
+    list.free[Guide](&op.*.guides);
+    if (op.*.has_guide) { list.free[Vox](&op.*.guide.path); }
+}
+
+fn journal_clear_redo(j: *Journal) void {
+    let i: i32 = 0;
+    while (i < j.*.redo.len) {
+        uop_free(&j.*.redo.data[i]);
+        i = i + 1;
+    }
+    j.*.redo.len = 0;
+}
+
+fn journal_clear(j: *Journal) void {
+    journal_clear_redo(j);
+    let i: i32 = 0;
+    while (i < j.*.undo.len) {
+        uop_free(&j.*.undo.data[i]);
+        i = i + 1;
+    }
+    j.*.undo.len = 0;
+}
+
+fn journal_push(j: *Journal, op: UOp) void {
+    journal_clear_redo(j);
+    list.push[UOp](&j.*.undo, op);
+    // bound the history
+    if (j.*.undo.len > 256) {
+        uop_free(&j.*.undo.data[0]);
+        let i: i32 = 0;
+        while (i + 1 < j.*.undo.len) {
+            j.*.undo.data[i] = j.*.undo.data[i + 1];
+            i = i + 1;
+        }
+        j.*.undo.len = j.*.undo.len - 1;
+    }
+}
+
+// journal entry builders — call right AFTER the scene mutation
+fn op_add_comp(j: *Journal, s: *Scene, id: i32) void {
+    let ci: i32 = scene_comp_index(s, id);
+    if (ci < 0) { return; }
+    let op: UOp = uop_empty();
+    op.kind = 1;
+    op.comp = s.*.comps.data[ci];
+    journal_push(j, op);
+}
+
+// call BEFORE removing the component
+fn op_del_comp(j: *Journal, s: *Scene, id: i32) void {
+    let ci: i32 = scene_comp_index(s, id);
+    if (ci < 0) { return; }
+    let op: UOp = uop_empty();
+    op.kind = 2;
+    op.comp = s.*.comps.data[ci];
+    snapshot_incident(s, id, &op.guides);
+    journal_push(j, op);
+}
+
+fn op_add_guide(j: *Journal, s: *Scene, gid: i32) void {
+    let gi: i32 = scene_guide_index(s, gid);
+    if (gi < 0) { return; }
+    let op: UOp = uop_empty();
+    op.kind = 3;
+    op.guide = guide_clone(s.*.guides.data[gi]);
+    op.has_guide = true;
+    journal_push(j, op);
+}
+
+// call BEFORE removing the guide
+fn op_del_guide(j: *Journal, s: *Scene, gid: i32) void {
+    let gi: i32 = scene_guide_index(s, gid);
+    if (gi < 0) { return; }
+    let op: UOp = uop_empty();
+    op.kind = 4;
+    op.guide = guide_clone(s.*.guides.data[gi]);
+    op.has_guide = true;
+    journal_push(j, op);
+}
+
+// call BEFORE the move (snapshots incident guides in their pre-move routing)
+fn op_move(j: *Journal, s: *Scene, id: i32, delta: Vox) void {
+    let ci: i32 = scene_comp_index(s, id);
+    if (ci < 0) { return; }
+    let op: UOp = uop_empty();
+    op.kind = 5;
+    op.comp = s.*.comps.data[ci];
+    op.old_origin = s.*.comps.data[ci].origin;
+    op.new_origin = vox_add(op.old_origin, delta);
+    snapshot_incident(s, id, &op.guides);
+    journal_push(j, op);
+}
+
+// apply the inverse of `op` to the scene (op moves undo->redo)
+fn journal_undo(j: *Journal, s: *Scene) bool {
+    if (j.*.undo.len == 0) { return false; }
+    let op: UOp = list.pop[UOp](&j.*.undo);
+    if (op.kind == 1) {
+        scene_remove(s, op.comp.id);
+    }
+    if (op.kind == 2) {
+        scene_restore_comp(s, op.comp);
+        let i: i32 = 0;
+        while (i < op.guides.len) {
+            scene_restore_guide(s, guide_clone(op.guides.data[i]));
+            i = i + 1;
+        }
+    }
+    if (op.kind == 3) {
+        scene_remove_guide(s, op.guide.id);
+    }
+    if (op.kind == 4) {
+        scene_restore_guide(s, guide_clone(op.guide));
+    }
+    if (op.kind == 5) {
+        // move back and restore the exact pre-move guide routing
+        let one: list.ArrayList[i32] = list.make[i32](1);
+        list.push[i32](&one, op.comp.id);
+        let back: Vox = vox(
+            op.old_origin.x - op.new_origin.x,
+            op.old_origin.y - op.new_origin.y,
+            op.old_origin.z - op.new_origin.z,
+        );
+        group_move(s, &one, back);
+        drop_incident(s, op.comp.id);
+        let i: i32 = 0;
+        while (i < op.guides.len) {
+            scene_restore_guide(s, guide_clone(op.guides.data[i]));
+            i = i + 1;
+        }
+        list.free[i32](&one);
+    }
+    list.push[UOp](&j.*.redo, op);
+    return true;
+}
+
+fn journal_redo(j: *Journal, s: *Scene) bool {
+    if (j.*.redo.len == 0) { return false; }
+    let op: UOp = list.pop[UOp](&j.*.redo);
+    if (op.kind == 1) { scene_restore_comp(s, op.comp); }
+    if (op.kind == 2) { scene_remove(s, op.comp.id); }
+    if (op.kind == 3) { scene_restore_guide(s, guide_clone(op.guide)); }
+    if (op.kind == 4) { scene_remove_guide(s, op.guide.id); }
+    if (op.kind == 5) {
+        let one: list.ArrayList[i32] = list.make[i32](1);
+        list.push[i32](&one, op.comp.id);
+        let fwd: Vox = vox(
+            op.new_origin.x - op.old_origin.x,
+            op.new_origin.y - op.old_origin.y,
+            op.new_origin.z - op.old_origin.z,
+        );
+        group_move(s, &one, fwd);
+        list.free[i32](&one);
+    }
+    list.push[UOp](&j.*.undo, op);
+    return true;
+}
+
+fn drop_incident(s: *Scene, id: i32) void {
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        if (s.*.guides.data[gi].from_c == id || s.*.guides.data[gi].to_c == id) {
+            scene_remove_guide_at(s, gi);
+        } else {
+            gi = gi + 1;
+        }
+    }
+}
+
+fn journal_undo_len(j: *Journal) i32 { return j.*.undo.len; }
+fn journal_redo_len(j: *Journal) i32 { return j.*.redo.len; }
+
+fn ser_int(out: *list.ArrayList[u8], v: i64) void {
+    let s: []u8 = _zag_i64_to_str(v);
+    let i: i32 = 0;
+    while (i < s.len) {
+        list.push[u8](out, s[i]);
+        i = i + 1;
+    }
+    list.push[u8](out, 32);
+}
+
+fn ser_text(out: *list.ArrayList[u8], s: []u8) void {
+    let i: i32 = 0;
+    while (i < s.len) {
+        list.push[u8](out, s[i]);
+        i = i + 1;
+    }
+}
+
+// parse whitespace-separated i64s from line[from..], stopping at '|' or end;
+// returns the index after the last consumed char through *stop
+fn parse_line_ints(line: []u8, from: i32, out: *list.ArrayList[i64], stop: *i32) void {
+    out.*.len = 0;
+    let i: i32 = from;
+    let done: bool = false;
+    while (i < line.len && !done) {
+        while (i < line.len && (line[i] as i32) == 32) { i = i + 1; }
+        if (i < line.len && (line[i] as i32) == '|') {
+            done = true;
+        } else {
+            let st: i32 = i;
+            while (i < line.len && (line[i] as i32) != 32 && (line[i] as i32) != '|') { i = i + 1; }
+            if (i > st) { list.push[i64](out, _zag_str_to_i64(line[st..i])); }
+            else { done = true; }
+        }
+    }
+    stop.* = i;
+}
+
+// ── .jrn undo/redo persistence (shared by GUI + agent via live session) ───────
+
+fn jrn_ser_comp_fields(out: *list.ArrayList[u8], c: Comp) void {
+    ser_int(out, c.id as i64);
+    ser_int(out, kind_index(c.kind) as i64);
+    ser_int(out, c.origin.x as i64);
+    ser_int(out, c.origin.y as i64);
+    ser_int(out, c.origin.z as i64);
+    ser_int(out, c.rot as i64);
+    let vis: i64 = 0;
+    if (c.visible) { vis = 1; }
+    ser_int(out, vis);
+    ser_int(out, c.preset as i64);
+    ser_int(out, (c.wl_nm * 1000.0) as i64);
+    ser_int(out, c.size.x as i64);
+    ser_int(out, c.size.y as i64);
+    ser_int(out, c.size.z as i64);
+}
+
+fn jrn_ser_guide(out: *list.ArrayList[u8], g: Guide) void {
+    ser_text(out, "g ");
+    ser_int(out, g.id as i64);
+    ser_int(out, g.from_c as i64);
+    ser_int(out, g.from_p as i64);
+    ser_int(out, g.to_c as i64);
+    ser_int(out, g.to_p as i64);
+    ser_int(out, g.path.len as i64);
+    let pi: i32 = 0;
+    while (pi < g.path.len) {
+        let v: Vox = list.get[Vox](g.path, pi);
+        ser_int(out, v.x as i64);
+        ser_int(out, v.y as i64);
+        ser_int(out, v.z as i64);
+        pi = pi + 1;
+    }
+    ser_text(out, "\n");
+}
+
+fn jrn_ser_op(out: *list.ArrayList[u8], op: UOp) void {
+    if (op.kind == 1 || op.kind == 2) {
+        if (op.kind == 1) { ser_text(out, "1 "); }
+        else { ser_text(out, "2 "); }
+        jrn_ser_comp_fields(out, op.comp);
+        ser_text(out, "|");
+        ser_text(out, op.comp.name_);
+        ser_text(out, "\n");
+        if (op.kind == 2) {
+            let gi: i32 = 0;
+            while (gi < op.guides.len) {
+                jrn_ser_guide(out, op.guides.data[gi]);
+                gi = gi + 1;
+            }
+        }
+    }
+    if (op.kind == 3 || op.kind == 4) {
+        if (op.kind == 3) { ser_text(out, "3 "); }
+        else { ser_text(out, "4 "); }
+        ser_int(out, op.guide.id as i64);
+        ser_int(out, op.guide.from_c as i64);
+        ser_int(out, op.guide.from_p as i64);
+        ser_int(out, op.guide.to_c as i64);
+        ser_int(out, op.guide.to_p as i64);
+        ser_int(out, op.guide.path.len as i64);
+        let gi: i32 = 0;
+        while (gi < op.guide.path.len) {
+            let v: Vox = list.get[Vox](op.guide.path, gi);
+            ser_int(out, v.x as i64);
+            ser_int(out, v.y as i64);
+            ser_int(out, v.z as i64);
+            gi = gi + 1;
+        }
+        ser_text(out, "\n");
+    }
+    if (op.kind == 5) {
+        ser_text(out, "5 ");
+        jrn_ser_comp_fields(out, op.comp);
+        ser_int(out, op.old_origin.x as i64);
+        ser_int(out, op.old_origin.y as i64);
+        ser_int(out, op.old_origin.z as i64);
+        ser_int(out, op.new_origin.x as i64);
+        ser_int(out, op.new_origin.y as i64);
+        ser_int(out, op.new_origin.z as i64);
+        ser_text(out, "|");
+        ser_text(out, op.comp.name_);
+        ser_text(out, "\n");
+        let gi: i32 = 0;
+        while (gi < op.guides.len) {
+            jrn_ser_guide(out, op.guides.data[gi]);
+            gi = gi + 1;
+        }
+    }
+}
+
+fn journal_save(j: *Journal, path: []u8) bool {
+    let out: list.ArrayList[u8] = list.make[u8](1024);
+    ser_text(&out, "jrn 1\nundo\n");
+    let ui: i32 = 0;
+    while (ui < j.*.undo.len) {
+        jrn_ser_op(&out, j.*.undo.data[ui]);
+        ui = ui + 1;
+    }
+    ser_text(&out, "redo\n");
+    let ri: i32 = 0;
+    while (ri < j.*.redo.len) {
+        jrn_ser_op(&out, j.*.redo.data[ri]);
+        ri = ri + 1;
+    }
+    let bytes: []u8 = out.data[0..out.len];
+    let rc: i32 = _zag_write_file(path, bytes);
+    list.free[u8](&out);
+    return rc == 0;
+}
+
+fn jrn_comp_from(nums: list.ArrayList[i64], name_: []u8) Comp {
+    return Comp{
+        .id = list.get[i64](nums, 0) as i32,
+        .kind = kind_at(list.get[i64](nums, 1) as i32),
+        .origin = vox(
+            list.get[i64](nums, 2) as i32,
+            list.get[i64](nums, 3) as i32,
+            list.get[i64](nums, 4) as i32),
+        .rot = list.get[i64](nums, 5) as i32,
+        .size = vox(
+            list.get[i64](nums, 9) as i32,
+            list.get[i64](nums, 10) as i32,
+            list.get[i64](nums, 11) as i32),
+        .visible = list.get[i64](nums, 6) == 1,
+        .wl_nm = (list.get[i64](nums, 8) as f64) / 1000.0,
+        .preset = list.get[i64](nums, 7) as i32,
+        .name_ = _zag_strdup(name_),
+    };
+}
+
+fn jrn_guide_from_nums(nums: list.ArrayList[i64], base: i32) Guide {
+    let n: i32 = list.get[i64](nums, base + 5) as i32;
+    let p: list.ArrayList[Vox] = list.make[Vox](n + 1);
+    let vi: i32 = 0;
+    while (vi < n) {
+        list.push[Vox](&p, vox(
+            list.get[i64](nums, base + 6 + vi * 3) as i32,
+            list.get[i64](nums, base + 7 + vi * 3) as i32,
+            list.get[i64](nums, base + 8 + vi * 3) as i32,
+        ));
+        vi = vi + 1;
+    }
+    let steps: i32 = n - 1;
+    if (steps < 0) { steps = 0; }
+    return Guide{
+        .id = list.get[i64](nums, base) as i32,
+        .from_c = list.get[i64](nums, base + 1) as i32,
+        .from_p = list.get[i64](nums, base + 2) as i32,
+        .to_c = list.get[i64](nums, base + 3) as i32,
+        .to_p = list.get[i64](nums, base + 4) as i32,
+        .path = p,
+        .length_nm = (steps as f64) * pitch_nm(),
+        .live = 0,
+    };
+}
+
+fn jrn_push_op(j: *Journal, stack: i32, op: UOp) void {
+    if (stack == 0) { list.push[UOp](&j.*.undo, op); }
+    else { list.push[UOp](&j.*.redo, op); }
+}
+
+fn jrn_parse_op_line(j: *Journal, stack: i32, line: []u8) void {
+    if (line.len < 2) { return; }
+    let kind: i32 = line[0] as i32 - 48;
+    if (kind < 1 || kind > 5) { return; }
+    let nums: list.ArrayList[i64] = list.make[i64](32);
+    let stop: i32 = 0;
+    parse_line_ints(line, 2, &nums, &stop);
+    if (kind == 1 || kind == 2) {
+        if (nums.len < 12) {
+            list.free[i64](&nums);
+            return;
+        }
+        let name_: []u8 = "";
+        if (stop < line.len && (line[stop] as i32) == 124) {
+            name_ = _zag_strdup(line[stop + 1..line.len]);
+        }
+        let op: UOp = uop_empty();
+        op.kind = kind;
+        op.comp = jrn_comp_from(nums, name_);
+        jrn_push_op(j, stack, op);
+    }
+    if (kind == 5) {
+        if (nums.len < 18) {
+            list.free[i64](&nums);
+            return;
+        }
+        let name5: []u8 = "";
+        if (stop < line.len && (line[stop] as i32) == 124) {
+            name5 = _zag_strdup(line[stop + 1..line.len]);
+        }
+        let op5: UOp = uop_empty();
+        op5.kind = 5;
+        op5.comp = jrn_comp_from(nums, name5);
+        op5.old_origin = vox(
+            list.get[i64](nums, 12) as i32,
+            list.get[i64](nums, 13) as i32,
+            list.get[i64](nums, 14) as i32);
+        op5.new_origin = vox(
+            list.get[i64](nums, 15) as i32,
+            list.get[i64](nums, 16) as i32,
+            list.get[i64](nums, 17) as i32);
+        jrn_push_op(j, stack, op5);
+    }
+    if (kind == 3 || kind == 4) {
+        if (nums.len < 6) {
+            list.free[i64](&nums);
+            return;
+        }
+        let opg: UOp = uop_empty();
+        opg.kind = kind;
+        opg.guide = jrn_guide_from_nums(nums, 0);
+        opg.has_guide = true;
+        jrn_push_op(j, stack, opg);
+    }
+    list.free[i64](&nums);
+}
+
+fn jrn_parse_guide_line(j: *Journal, stack: i32, line: []u8) void {
+    if (line.len < 3 || (line[0] as i32) != 'g' || (line[1] as i32) != 32) { return; }
+    let nums: list.ArrayList[i64] = list.make[i64](32);
+    let stop: i32 = 0;
+    parse_line_ints(line, 2, &nums, &stop);
+    if (nums.len < 6) {
+        list.free[i64](&nums);
+        return;
+    }
+    let g: Guide = jrn_guide_from_nums(nums, 0);
+    if (stack == 0) {
+        if (j.*.undo.len == 0) {
+            list.free[Vox](&g.path);
+            list.free[i64](&nums);
+            return;
+        }
+        let idx: i32 = j.*.undo.len - 1;
+        let op: UOp = j.*.undo.data[idx];
+        if (op.kind == 2 || op.kind == 5) {
+            list.push[Guide](&op.guides, guide_clone(g));
+            j.*.undo.data[idx] = op;
+        } else {
+            list.free[Vox](&g.path);
+        }
+    } else {
+        if (j.*.redo.len == 0) {
+            list.free[Vox](&g.path);
+            list.free[i64](&nums);
+            return;
+        }
+        let idx2: i32 = j.*.redo.len - 1;
+        let op2: UOp = j.*.redo.data[idx2];
+        if (op2.kind == 2 || op2.kind == 5) {
+            list.push[Guide](&op2.guides, guide_clone(g));
+            j.*.redo.data[idx2] = op2;
+        } else {
+            list.free[Vox](&g.path);
+        }
+    }
+    list.free[Vox](&g.path);
+    list.free[i64](&nums);
+}
+
+fn journal_load(j: *Journal, path: []u8) bool {
+    let raw: []u8 = _zag_read_file(path);
+    if (raw.len <= 0) { return false; }
+    journal_clear(j);
+    let stack: i32 = 0;
+    let pos: i32 = 0;
+    while (pos < raw.len) {
+        let eol: i32 = pos;
+        while (eol < raw.len && (raw[eol] as i32) != 10) { eol = eol + 1; }
+        let line: []u8 = raw[pos..eol];
+        pos = eol + 1;
+        if (line.len >= 4 && (line[0] as i32) == 'j' && (line[1] as i32) == 'r' && (line[2] as i32) == 'n') {
+            pos = pos + 0;
+        } else if (line.len >= 4 && (line[0] as i32) == 'u' && (line[1] as i32) == 'n' && (line[2] as i32) == 'd') {
+            stack = 0;
+        } else if (line.len >= 4 && (line[0] as i32) == 'r' && (line[1] as i32) == 'e' && (line[2] as i32) == 'd') {
+            stack = 1;
+        } else if (line.len >= 2 && (line[0] as i32) == 'g' && (line[1] as i32) == 32) {
+            jrn_parse_guide_line(j, stack, line);
+        } else if (line.len >= 2 && (line[0] as i32) >= 49 && (line[0] as i32) <= 53 && (line[1] as i32) == 32) {
+            jrn_parse_op_line(j, stack, line);
+        }
+    }
+    return true;
+}
+
+// ── .zpa design files ─────────────────────────────────────────────────────────
+
+fn design_save(s: *Scene, path: []u8) bool {
+    let out: list.ArrayList[u8] = list.make[u8](1024);
+    ser_text(&out, "zpa 1\n");
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        let c: Comp = s.*.comps.data[i];
+        ser_text(&out, "c ");
+        ser_int(&out, c.id as i64);
+        ser_int(&out, kind_index(c.kind) as i64);
+        ser_int(&out, c.origin.x as i64);
+        ser_int(&out, c.origin.y as i64);
+        ser_int(&out, c.origin.z as i64);
+        ser_int(&out, c.rot as i64);
+        let vis: i64 = 0;
+        if (c.visible) { vis = 1; }
+        ser_int(&out, vis);
+        ser_int(&out, c.preset as i64);
+        ser_int(&out, (c.wl_nm * 1000.0) as i64);
+        ser_text(&out, "|");
+        ser_text(&out, c.name_);
+        ser_text(&out, "\n");
+        i = i + 1;
+    }
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        let g: Guide = s.*.guides.data[gi];
+        ser_text(&out, "g ");
+        ser_int(&out, g.id as i64);
+        ser_int(&out, g.from_c as i64);
+        ser_int(&out, g.from_p as i64);
+        ser_int(&out, g.to_c as i64);
+        ser_int(&out, g.to_p as i64);
+        ser_int(&out, g.path.len as i64);
+        let pi: i32 = 0;
+        while (pi < g.path.len) {
+            let v: Vox = list.get[Vox](g.path, pi);
+            ser_int(&out, v.x as i64);
+            ser_int(&out, v.y as i64);
+            ser_int(&out, v.z as i64);
+            pi = pi + 1;
+        }
+        ser_text(&out, "\n");
+        gi = gi + 1;
+    }
+    let bytes: []u8 = out.data[0..out.len];
+    let rc: i32 = _zag_write_file(path, bytes);
+    list.free[u8](&out);
+    return rc == 0;
+}
+
+fn design_load(s: *Scene, path: []u8) bool {
+    let raw: []u8 = _zag_read_file(path);
+    if (raw.len <= 0) { return false; }
+    scene_clear(s);
+
+    let nums: list.ArrayList[i64] = list.make[i64](32);
+    let counts: list.ArrayList[i32] = list.make[i32](8);
+    let ki: i32 = 0;
+    while (ki < kind_count()) {
+        list.push[i32](&counts, 0);
+        ki = ki + 1;
+    }
+
+    let pos: i32 = 0;
+    while (pos < raw.len) {
+        let eol: i32 = pos;
+        while (eol < raw.len && (raw[eol] as i32) != 10) { eol = eol + 1; }
+        let line: []u8 = raw[pos..eol];
+        pos = eol + 1;
+
+        if (line.len > 2 && (line[0] as i32) == 'c' && (line[1] as i32) == 32) {
+            let stop: i32 = 0;
+            parse_line_ints(line, 1, &nums, &stop);
+            if (nums.len >= 9) {
+                let name_: []u8 = "part";
+                if (stop < line.len && (line[stop] as i32) == '|') {
+                    name_ = _zag_strdup(line[stop + 1..line.len]);
+                }
+                let kidx: i32 = list.get[i64](nums, 1) as i32;
+                let c: Comp = Comp{
+                    .id = list.get[i64](nums, 0) as i32,
+                    .kind = kind_at(kidx),
+                    .origin = vox(list.get[i64](nums, 2) as i32, list.get[i64](nums, 3) as i32, list.get[i64](nums, 4) as i32),
+                    .rot = list.get[i64](nums, 5) as i32,
+                    .size = kind_fp(kind_at(kidx)),
+                    .visible = list.get[i64](nums, 6) == 1,
+                    .wl_nm = (list.get[i64](nums, 8) as f64) / 1000.0,
+                    .preset = list.get[i64](nums, 7) as i32,
+                    .name_ = name_,
+                };
+                scene_restore_comp(s, c);
+                list.set[i32](&counts, kidx, list.get[i32](counts, kidx) + 1);
+            }
+        }
+        if (line.len > 2 && (line[0] as i32) == 'g' && (line[1] as i32) == 32) {
+            let stop2: i32 = 0;
+            parse_line_ints(line, 1, &nums, &stop2);
+            if (nums.len >= 6) {
+                let n: i32 = list.get[i64](nums, 5) as i32;
+                if (nums.len >= 6 + n * 3) {
+                    let p: list.ArrayList[Vox] = list.make[Vox](n + 1);
+                    let vi: i32 = 0;
+                    while (vi < n) {
+                        list.push[Vox](&p, vox(
+                            list.get[i64](nums, 6 + vi * 3) as i32,
+                            list.get[i64](nums, 7 + vi * 3) as i32,
+                            list.get[i64](nums, 8 + vi * 3) as i32,
+                        ));
+                        vi = vi + 1;
+                    }
+                    let steps: i32 = n - 1;
+                    if (steps < 0) { steps = 0; }
+                    let g: Guide = Guide{
+                        .id = list.get[i64](nums, 0) as i32,
+                        .from_c = list.get[i64](nums, 1) as i32,
+                        .from_p = list.get[i64](nums, 2) as i32,
+                        .to_c = list.get[i64](nums, 3) as i32,
+                        .to_p = list.get[i64](nums, 4) as i32,
+                        .path = p,
+                        .length_nm = (steps as f64) * pitch_nm(),
+                        .live = 0,
+                    };
+                    scene_restore_guide(s, g);
+                }
+            }
+        }
+    }
+    // naming counters resume past what the file used
+    let k2: i32 = 0;
+    while (k2 < kind_count()) {
+        list.set[i32](&s.*.made, k2, list.get[i32](counts, k2));
+        k2 = k2 + 1;
+    }
+    list.free[i64](&nums);
+    list.free[i32](&counts);
+    s.*.topo_dirty = true;
+    return true;
+}
+
+// ── directory listing for the Open dialog ─────────────────────────────────────
+
+// Collect *.zpa filenames in the working directory.
+fn list_designs(out: *list.ArrayList[[]u8]) void {
+    out.*.len = 0;
+    let dot: list.ArrayList[u8] = list.make[u8](2);
+    list.push[u8](&dot, 46);   // "."
+    list.push[u8](&dot, 0);
+    // open(".", O_RDONLY|O_DIRECTORY)
+    let fd: i64 = _zag_raw_syscall(2, dot.data as i64, 65536, 0, 0, 0, 0);
+    list.free[u8](&dot);
+    if (fd < 0) { return; }
+
+    let buf: list.ArrayList[u8] = list.make[u8](8192);
+    buf.len = 8192;
+    let reading: bool = true;
+    while (reading) {
+        let n: i64 = _zag_raw_syscall(217, fd, buf.data as i64, 8192, 0, 0, 0);
+        if (n <= 0) {
+            reading = false;
+        } else {
+            let off: i32 = 0;
+            while ((off as i64) < n) {
+                // dirent64: ino(8) off(8) reclen(2) type(1) name(nul-terminated)
+                let reclen: i32 = (buf.data[off + 16] as i32) + (buf.data[off + 17] as i32) * 256;
+                let name_start: i32 = off + 19;
+                let name_end: i32 = name_start;
+                while (name_end < off + reclen && (buf.data[name_end] as i32) != 0) {
+                    name_end = name_end + 1;
+                }
+                let nm: []u8 = buf.data[name_start..name_end];
+                if (nm.len > 4) {
+                    let e: i32 = nm.len;
+                    if ((nm[e - 4] as i32) == '.' && (nm[e - 3] as i32) == 'z' &&
+                        (nm[e - 2] as i32) == 'p' && (nm[e - 1] as i32) == 'a') {
+                        list.push[[]u8](out, _zag_strdup(nm));
+                    }
+                }
+                off = off + reclen;
+            }
+        }
+    }
+    let _c: i64 = _zag_raw_syscall(3, fd, 0, 0, 0, 0, 0);
+    list.free[u8](&buf);
+}

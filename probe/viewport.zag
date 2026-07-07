@@ -1,0 +1,632 @@
+// viewport.zag — the 3D viewport. Software-rasterized in Zag:
+//   * view-space pipeline with true near-plane clipping (no vanishing
+//     geometry when the camera moves close)
+//   * z-buffered triangle fill with incremental edge functions
+//   * anti-aliased, depth-faded 3D lines (Wu coverage)
+//   * flat-shaded boxes with a fixed key light
+
+@import("../std/list.zag") as list
+@import("fb.zag")
+@import("math3d.zag")
+@import("ui.zag")
+@import("voxel.zag")
+@import("components.zag")
+@import("scene.zag")
+@import("ternary.zag")
+
+fn z_far() i64 { return 1099511627776; }   // 2^40 sentinel
+fn near_z() f64 { return 0.15; }
+fn fade_start() f64 { return 26.0; }
+fn fade_end() f64 { return 110.0; }
+
+// Screen-space projected point.
+struct P3 {
+    x: f64,
+    y: f64,
+    z: f64,
+    ok: bool,
+}
+
+// View-space point (camera basis coords; z = depth along forward).
+struct VPt {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+fn view_of(cam: Cam, p: Vec3) VPt {
+    let eye: Vec3 = cam.eye;
+    let rel: Vec3 = vsub(p, eye);
+    let rgt: Vec3 = cam.right;
+    let up: Vec3 = cam.up;
+    let fwd: Vec3 = cam.fwd;
+    return VPt{ .x = vdot(rel, rgt), .y = vdot(rel, up), .z = vdot(rel, fwd) };
+}
+
+fn vpt_lerp(a: VPt, b: VPt, t: f64) VPt {
+    return VPt{
+        .x = a.x + (b.x - a.x) * t,
+        .y = a.y + (b.y - a.y) * t,
+        .z = a.z + (b.z - a.z) * t,
+    };
+}
+
+// Project a view point (z must be > near) to screen coords inside `clip`.
+fn vp_screen(clip: Rect, cam: Cam, v: VPt) P3 {
+    return P3{
+        .x = (clip.x as f64) + (clip.w as f64) * 0.5 + v.x * cam.flen / v.z,
+        .y = (clip.y as f64) + (clip.h as f64) * 0.5 - v.y * cam.flen / v.z,
+        .z = v.z,
+        .ok = true,
+    };
+}
+
+// Legacy helper (HUD overlays): world -> screen, not near-clipped.
+fn vp_proj(cam: Cam, r: Rect, p: Vec3) P3 {
+    let v: VPt = view_of(cam, p);
+    if (v.z <= near_z()) {
+        return P3{ .x = 0.0, .y = 0.0, .z = 0.0, .ok = false };
+    }
+    return vp_screen(r, cam, v);
+}
+
+// Depth fade factor 64..256 (distant geometry sinks toward the backdrop).
+fn depth_alpha(z: f64) i32 {
+    if (z <= fade_start()) { return 256; }
+    if (z >= fade_end()) { return 64; }
+    let t: f64 = (z - fade_start()) / (fade_end() - fade_start());
+    return 256 - ((t * 192.0) as i32);
+}
+
+fn vp_clear(f: *FB, r: Rect) void {
+    // subtle vertical gradient backdrop
+    let y: i32 = r.y;
+    while (y < r.y + r.h) {
+        let t: i32 = ((y - r.y) * 256) / r.h;
+        let c: i64 = mix(rgb(13, 14, 18), rgb(24, 26, 33), t);
+        let base: i32 = y * f.*.w;
+        let x: i32 = r.x;
+        while (x < r.x + r.w) {
+            f.*.px.data[base + x] = c;
+            f.*.zb.data[base + x] = z_far();
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+}
+
+// ── z-buffered screen-space triangle (flat color, alpha, optional z-write) ───
+
+fn tri_z(f: *FB, clip: Rect, a: P3, b: P3, c: P3, col: i64, alpha: i32, zwrite: bool) void {
+    let area: f64 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (area > 0.0 - 0.0001 && area < 0.0001) { return; }
+
+    let x0: i32 = ifloor(fmin(a.x, fmin(b.x, c.x)));
+    let x1: i32 = ifloor(fmax(a.x, fmax(b.x, c.x))) + 1;
+    let y0: i32 = ifloor(fmin(a.y, fmin(b.y, c.y)));
+    let y1: i32 = ifloor(fmax(a.y, fmax(b.y, c.y))) + 1;
+    if (x0 < clip.x) { x0 = clip.x; }
+    if (y0 < clip.y) { y0 = clip.y; }
+    if (x1 > clip.x + clip.w) { x1 = clip.x + clip.w; }
+    if (y1 > clip.y + clip.h) { y1 = clip.y + clip.h; }
+    if (x0 >= x1 || y0 >= y1) { return; }
+
+    let inv: f64 = 1.0 / area;
+    let gx: f64 = ((b.z - a.z) * (c.y - a.y) - (c.z - a.z) * (b.y - a.y)) * inv;
+    let gy: f64 = ((c.z - a.z) * (b.x - a.x) - (b.z - a.z) * (c.x - a.x)) * inv;
+
+    let px0: f64 = (x0 as f64) + 0.5;
+    let py0: f64 = (y0 as f64) + 0.5;
+    let e0r: f64 = (px0 - a.x) * (b.y - a.y) - (py0 - a.y) * (b.x - a.x);
+    let e1r: f64 = (px0 - b.x) * (c.y - b.y) - (py0 - b.y) * (c.x - b.x);
+    let e2r: f64 = (px0 - c.x) * (a.y - c.y) - (py0 - c.y) * (a.x - c.x);
+    let e0dx: f64 = b.y - a.y;
+    let e0dy: f64 = 0.0 - (b.x - a.x);
+    let e1dx: f64 = c.y - b.y;
+    let e1dy: f64 = 0.0 - (c.x - b.x);
+    let e2dx: f64 = a.y - c.y;
+    let e2dy: f64 = 0.0 - (a.x - c.x);
+    let zr: f64 = a.z + gx * (px0 - a.x) + gy * (py0 - a.y);
+
+    // depth fade per triangle (cheap + visually identical at CAD scales)
+    let da: i32 = depth_alpha((a.z + b.z + c.z) * 0.333333);
+    let ea: i32 = (alpha * da) >> 8;
+    let neg: bool = area < 0.0;
+    let y: i32 = y0;
+    while (y < y1) {
+        let e0: f64 = e0r;
+        let e1: f64 = e1r;
+        let e2: f64 = e2r;
+        let z: f64 = zr;
+        let base: i32 = y * f.*.w;
+        let x: i32 = x0;
+        while (x < x1) {
+            // e_i = -(standard edge fn): inside when every e_i opposes area's sign
+            let inside: bool = false;
+            if (neg) {
+                inside = e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0;
+            } else {
+                inside = e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0;
+            }
+            if (inside) {
+                let zq: i64 = (z * 1024.0) as i64;
+                let idx: i32 = base + x;
+                if (zq < f.*.zb.data[idx]) {
+                    if (ea >= 252) {
+                        f.*.px.data[idx] = col;
+                    } else {
+                        f.*.px.data[idx] = mix(col, f.*.px.data[idx], ea);
+                    }
+                    if (zwrite) { f.*.zb.data[idx] = zq; }
+                }
+            }
+            e0 = e0 + e0dx;
+            e1 = e1 + e1dx;
+            e2 = e2 + e2dx;
+            z = z + gx;
+            x = x + 1;
+        }
+        e0r = e0r + e0dy;
+        e1r = e1r + e1dy;
+        e2r = e2r + e2dy;
+        zr = zr + gy;
+        y = y + 1;
+    }
+}
+
+// ── near-plane-clipped triangle from view space ───────────────────────────────
+
+fn tri_raster3(f: *FB, clip: Rect, cam: Cam, a: VPt, b: VPt, c: VPt, col: i64, alpha: i32, zwrite: bool) void {
+    let pa: P3 = vp_screen(clip, cam, a);
+    let pb: P3 = vp_screen(clip, cam, b);
+    let pc: P3 = vp_screen(clip, cam, c);
+    tri_z(f, clip, pa, pb, pc, col, alpha, zwrite);
+}
+
+fn tri_view(f: *FB, clip: Rect, cam: Cam, a: VPt, b: VPt, c: VPt, col: i64, alpha: i32, zwrite: bool) void {
+    let nz: f64 = near_z();
+    let ain: bool = a.z > nz;
+    let bin: bool = b.z > nz;
+    let cin: bool = c.z > nz;
+
+    if (ain && bin && cin) {
+        tri_raster3(f, clip, cam, a, b, c, col, alpha, zwrite);
+        return;
+    }
+    if (!ain && !bin && !cin) { return; }
+
+    // rotate so the cases collapse: one-in (v0 in) or two-in (v0,v1 in)
+    let v0: VPt = a;
+    let v1: VPt = b;
+    let v2: VPt = c;
+    let n_in: i32 = 0;
+    if (ain) { n_in = n_in + 1; }
+    if (bin) { n_in = n_in + 1; }
+    if (cin) { n_in = n_in + 1; }
+
+    if (n_in == 1) {
+        if (bin) { v0 = b; v1 = c; v2 = a; }
+        if (cin) { v0 = c; v1 = a; v2 = b; }
+        let t1: f64 = (nz - v0.z) / (v1.z - v0.z);
+        let t2: f64 = (nz - v0.z) / (v2.z - v0.z);
+        let d: VPt = vpt_lerp(v0, v1, t1);
+        let e: VPt = vpt_lerp(v0, v2, t2);
+        tri_raster3(f, clip, cam, v0, d, e, col, alpha, zwrite);
+        return;
+    }
+    // two in: rotate so v2 is the out vertex
+    if (!ain) { v0 = b; v1 = c; v2 = a; }
+    if (!bin) { v0 = c; v1 = a; v2 = b; }
+    let t1b: f64 = (nz - v1.z) / (v2.z - v1.z);
+    let t0b: f64 = (nz - v0.z) / (v2.z - v0.z);
+    let d2: VPt = vpt_lerp(v1, v2, t1b);
+    let e2: VPt = vpt_lerp(v0, v2, t0b);
+    tri_raster3(f, clip, cam, v0, v1, d2, col, alpha, zwrite);
+    tri_raster3(f, clip, cam, v0, d2, e2, col, alpha, zwrite);
+}
+
+// world-space quad -> two clipped triangles
+fn quad3d(f: *FB, clip: Rect, cam: Cam, p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, col: i64, alpha: i32, zwrite: bool) void {
+    let a: VPt = view_of(cam, p0);
+    let b: VPt = view_of(cam, p1);
+    let c: VPt = view_of(cam, p2);
+    let d: VPt = view_of(cam, p3);
+    tri_view(f, clip, cam, a, b, c, col, alpha, zwrite);
+    tri_view(f, clip, cam, a, c, d, col, alpha, zwrite);
+}
+
+// ── anti-aliased, depth-faded, z-tested 3D line ───────────────────────────────
+
+fn line3_px(f: *FB, clip: Rect, x: i32, y: i32, z: f64, col: i64, cov: i32, zwrite: bool) void {
+    if (x < clip.x || x >= clip.x + clip.w || y < clip.y || y >= clip.y + clip.h) { return; }
+    let zq: i64 = ((z - 0.03) * 1024.0) as i64;
+    let idx: i32 = y * f.*.w + x;
+    if (zq < f.*.zb.data[idx]) {
+        let da: i32 = depth_alpha(z);
+        let ea: i32 = (cov * da) >> 8;
+        f.*.px.data[idx] = mix(col, f.*.px.data[idx], ea);
+        if (zwrite && cov > 128) { f.*.zb.data[idx] = zq; }
+    }
+}
+
+fn line3(f: *FB, cam: Cam, clip: Rect, p0: Vec3, p1: Vec3, col: i64, zwrite: bool) void {
+    let a: VPt = view_of(cam, p0);
+    let b: VPt = view_of(cam, p1);
+    let nz: f64 = near_z();
+    if (a.z <= nz && b.z <= nz) { return; }
+    if (a.z <= nz) {
+        let t: f64 = (nz + 0.001 - a.z) / (b.z - a.z);
+        a = vpt_lerp(a, b, t);
+    }
+    if (b.z <= nz) {
+        let t: f64 = (nz + 0.001 - b.z) / (a.z - b.z);
+        b = vpt_lerp(b, a, t);
+    }
+    let pa: P3 = vp_screen(clip, cam, a);
+    let pb: P3 = vp_screen(clip, cam, b);
+
+    let dx: f64 = pb.x - pa.x;
+    let dy: f64 = pb.y - pa.y;
+    let adx: f64 = fabs(dx);
+    let ady: f64 = fabs(dy);
+    let steps: i32 = 0;
+    if (adx > ady) { steps = adx as i32; } else { steps = ady as i32; }
+    if (steps < 1) { steps = 1; }
+    if (steps > 4000) { return; }
+
+    // Wu-style: walk the major axis, blend two pixels on the minor axis by
+    // fractional coverage.
+    let major_x: bool = adx > ady;
+    let i: i32 = 0;
+    while (i <= steps) {
+        let t: f64 = (i as f64) / (steps as f64);
+        let x: f64 = pa.x + dx * t;
+        let y: f64 = pa.y + dy * t;
+        let z: f64 = pa.z + (pb.z - pa.z) * t;
+        if (major_x) {
+            let yi: i32 = ifloor(y);
+            let fr: f64 = y - (yi as f64);
+            let c1: i32 = ((1.0 - fr) * 240.0) as i32;
+            let c2: i32 = (fr * 240.0) as i32;
+            line3_px(f, clip, x as i32, yi, z, col, c1, zwrite);
+            line3_px(f, clip, x as i32, yi + 1, z, col, c2, zwrite);
+        } else {
+            let xi: i32 = ifloor(x);
+            let fr: f64 = x - (xi as f64);
+            let c1: i32 = ((1.0 - fr) * 240.0) as i32;
+            let c2: i32 = (fr * 240.0) as i32;
+            line3_px(f, clip, xi, y as i32, z, col, c1, zwrite);
+            line3_px(f, clip, xi + 1, y as i32, z, col, c2, zwrite);
+        }
+        i = i + 1;
+    }
+}
+
+// ── flat-shaded axis-aligned box (near-clipped) ───────────────────────────────
+
+fn vp_box(f: *FB, cam: Cam, clip: Rect, bmin: Vec3, bmax: Vec3, col: i64, alpha: i32, zwrite: bool) void {
+    let v000: VPt = view_of(cam, v3(bmin.x, bmin.y, bmin.z));
+    let v100: VPt = view_of(cam, v3(bmax.x, bmin.y, bmin.z));
+    let v010: VPt = view_of(cam, v3(bmin.x, bmax.y, bmin.z));
+    let v110: VPt = view_of(cam, v3(bmax.x, bmax.y, bmin.z));
+    let v001: VPt = view_of(cam, v3(bmin.x, bmin.y, bmax.z));
+    let v101: VPt = view_of(cam, v3(bmax.x, bmin.y, bmax.z));
+    let v011: VPt = view_of(cam, v3(bmin.x, bmax.y, bmax.z));
+    let v111: VPt = view_of(cam, v3(bmax.x, bmax.y, bmax.z));
+
+    // top (+y): brightest, then sides by axis, bottom darkest
+    let ct: i64 = shade(col, 256);
+    tri_view(f, clip, cam, v010, v110, v111, ct, alpha, zwrite);
+    tri_view(f, clip, cam, v010, v111, v011, ct, alpha, zwrite);
+    let cb: i64 = shade(col, 110);
+    tri_view(f, clip, cam, v000, v001, v101, cb, alpha, zwrite);
+    tri_view(f, clip, cam, v000, v101, v100, cb, alpha, zwrite);
+    let cpx: i64 = shade(col, 205);
+    tri_view(f, clip, cam, v100, v101, v111, cpx, alpha, zwrite);
+    tri_view(f, clip, cam, v100, v111, v110, cpx, alpha, zwrite);
+    let cnx: i64 = shade(col, 150);
+    tri_view(f, clip, cam, v000, v010, v011, cnx, alpha, zwrite);
+    tri_view(f, clip, cam, v000, v011, v001, cnx, alpha, zwrite);
+    let cpz: i64 = shade(col, 180);
+    tri_view(f, clip, cam, v001, v011, v111, cpz, alpha, zwrite);
+    tri_view(f, clip, cam, v001, v111, v101, cpz, alpha, zwrite);
+    let cnz: i64 = shade(col, 135);
+    tri_view(f, clip, cam, v000, v100, v110, cnz, alpha, zwrite);
+    tri_view(f, clip, cam, v000, v110, v010, cnz, alpha, zwrite);
+}
+
+fn vp_box_wire(f: *FB, cam: Cam, clip: Rect, bmin: Vec3, bmax: Vec3, col: i64) void {
+    let a: Vec3 = v3(bmin.x, bmin.y, bmin.z);
+    let b: Vec3 = v3(bmax.x, bmin.y, bmin.z);
+    let c: Vec3 = v3(bmax.x, bmin.y, bmax.z);
+    let d: Vec3 = v3(bmin.x, bmin.y, bmax.z);
+    let e: Vec3 = v3(bmin.x, bmax.y, bmin.z);
+    let g: Vec3 = v3(bmax.x, bmax.y, bmin.z);
+    let h: Vec3 = v3(bmax.x, bmax.y, bmax.z);
+    let i: Vec3 = v3(bmin.x, bmax.y, bmax.z);
+    line3(f, cam, clip, a, b, col, false);
+    line3(f, cam, clip, b, c, col, false);
+    line3(f, cam, clip, c, d, col, false);
+    line3(f, cam, clip, d, a, col, false);
+    line3(f, cam, clip, e, g, col, false);
+    line3(f, cam, clip, g, h, col, false);
+    line3(f, cam, clip, h, i, col, false);
+    line3(f, cam, clip, i, e, col, false);
+    line3(f, cam, clip, a, e, col, false);
+    line3(f, cam, clip, b, g, col, false);
+    line3(f, cam, clip, c, h, col, false);
+    line3(f, cam, clip, d, i, col, false);
+}
+
+// voxel -> world helpers
+fn vx0(v: Vox) Vec3 {
+    return v3(v.x as f64, v.y as f64, v.z as f64);
+}
+
+fn vox_center(v: Vox) Vec3 {
+    return v3((v.x as f64) + 0.5, (v.y as f64) + 0.5, (v.z as f64) + 0.5);
+}
+
+// ── the design grid ───────────────────────────────────────────────────────────
+
+fn vp_grid(f: *FB, cam: Cam, clip: Rect) void {
+    let ext: i32 = 48;
+    let minor: i64 = rgb(42, 45, 54);
+    let major: i64 = rgb(62, 66, 79);
+    let i: i32 = 0;
+    while (i <= ext) {
+        let col: i64 = minor;
+        if (i % 8 == 0) { col = major; }
+        line3(f, cam, clip, v3(i as f64, 0.0, 0.0), v3(i as f64, 0.0, ext as f64), col, true);
+        line3(f, cam, clip, v3(0.0, 0.0, i as f64), v3(ext as f64, 0.0, i as f64), col, true);
+        i = i + 1;
+    }
+    line3(f, cam, clip, v3(0.0, 0.0, 0.0), v3(ext as f64, 0.0, 0.0), rgb(158, 74, 74), true);
+    line3(f, cam, clip, v3(0.0, 0.0, 0.0), v3(0.0, 0.0, ext as f64), rgb(74, 104, 172), true);
+}
+
+// ── component rendering ───────────────────────────────────────────────────────
+
+fn draw_plate(f: *FB, cam: Cam, clip: Rect, c: Comp) void {
+    let o: Vec3 = vx0(c.origin);
+    let e: Vox = comp_ext(c);
+    // full-height substrate slab: components sit directly on its top face
+    let top: f64 = o.y + 0.97;
+    let slab_min: Vec3 = v3(o.x + 0.04, o.y, o.z + 0.04);
+    let slab_max: Vec3 = v3(o.x + (e.x as f64) - 0.04, top, o.z + (e.z as f64) - 0.04);
+    vp_box(f, cam, clip, slab_min, slab_max, rgb(72, 78, 92), 256, true);
+    // waffle pockets: dark inset tops per lattice cell
+    let px: i32 = 0;
+    while (px < e.x) {
+        let pz: i32 = 0;
+        while (pz < e.z) {
+            let cx: f64 = o.x + (px as f64);
+            let cz: f64 = o.z + (pz as f64);
+            quad3d(f, clip, cam,
+                v3(cx + 0.15, top + 0.012, cz + 0.15),
+                v3(cx + 0.85, top + 0.012, cz + 0.15),
+                v3(cx + 0.85, top + 0.012, cz + 0.85),
+                v3(cx + 0.15, top + 0.012, cz + 0.85),
+                rgb(40, 43, 52), 256, true);
+            pz = pz + 1;
+        }
+        px = px + 1;
+    }
+    vp_box_wire(f, cam, clip, slab_min, slab_max, rgb(96, 104, 120));
+}
+
+fn draw_chamber(f: *FB, cam: Cam, clip: Rect, c: Comp, soh_n: i32) void {
+    let o: Vec3 = vx0(c.origin);
+    let e: Vox = comp_ext(c);
+    let mn: Vec3 = v3(o.x + 0.06, o.y, o.z + 0.06);
+    let mx: Vec3 = v3(o.x + (e.x as f64) - 0.06, o.y + (e.y as f64) - 0.1, o.z + (e.z as f64) - 0.06);
+    // dark cavity core (the hollow interior)
+    let core_mn: Vec3 = v3(mn.x + 0.35, mn.y + 0.25, mn.z + 0.35);
+    let core_mx: Vec3 = v3(mx.x - 0.35, mx.y - 0.25, mx.z - 0.35);
+    let core_col: i64 = rgb(20, 26, 38);
+    if (soh_n > 0) { core_col = rgb(28, 44, 66); }
+    vp_box(f, cam, clip, core_mn, core_mx, core_col, 256, true);
+    // reflective shell
+    vp_box(f, cam, clip, mn, mx, rgb(170, 188, 208), 110, false);
+    vp_box_wire(f, cam, clip, mn, mx, rgb(214, 230, 248));
+    // port nozzles
+    let pi: i32 = 0;
+    while (pi < kind_port_count(c.kind)) {
+        let cell: Vox = comp_port_cell(c, pi);
+        let d: Vox = comp_port_dir(c, pi);
+        let ctr: Vec3 = vox_center(cell);
+        let face: Vec3 = v3(
+            ctr.x + (d.x as f64) * 0.5,
+            ctr.y + (d.y as f64) * 0.5,
+            ctr.z + (d.z as f64) * 0.5,
+        );
+        let p: Port = kind_port(c.kind, pi);
+        let ncol: i64 = rgb(128, 140, 156);
+        if (p.is_output) { ncol = rgb(232, 186, 98); }
+        let s: f64 = 0.14;
+        let nmn: Vec3 = v3(face.x - s, face.y - s, face.z - s);
+        let nmx: Vec3 = v3(face.x + s, face.y + s, face.z + s);
+        vp_box(f, cam, clip, nmn, nmx, ncol, 256, true);
+        pi = pi + 1;
+    }
+}
+
+fn draw_soh(f: *FB, cam: Cam, clip: Rect, c: Comp) void {
+    let o: Vec3 = vx0(c.origin);
+    let e: Vox = comp_ext(c);
+    let mn: Vec3 = v3(o.x + 0.3, o.y + 0.05, o.z + 0.08);
+    let mx: Vec3 = v3(o.x + (e.x as f64) - 0.3, o.y + (e.y as f64) - 0.1, o.z + (e.z as f64) - 0.08);
+    if (e.x > e.z) {
+        mn = v3(o.x + 0.08, o.y + 0.05, o.z + 0.3);
+        mx = v3(o.x + (e.x as f64) - 0.08, o.y + (e.y as f64) - 0.1, o.z + (e.z as f64) - 0.3);
+    }
+    vp_box(f, cam, clip, mn, mx, rgb(150, 226, 255), 92, false);
+    vp_box_wire(f, cam, clip, mn, mx, rgb(196, 238, 255));
+    let t: f64 = 0.25;
+    while (t < 1.0) {
+        let y: f64 = mn.y + (mx.y - mn.y) * t;
+        line3(f, cam, clip, v3(mn.x, y, mn.z), v3(mx.x, y, mx.z), rgb(132, 200, 234), false);
+        t = t + 0.25;
+    }
+}
+
+fn draw_emitter(f: *FB, cam: Cam, clip: Rect, c: Comp) void {
+    let o: Vec3 = vx0(c.origin);
+    let e: Vox = comp_ext(c);
+    let tw_mn: Vec3 = v3(o.x + 0.12, o.y, o.z + 0.12);
+    let tw_mx: Vec3 = v3(o.x + (e.x as f64) - 0.12, o.y + 1.35, o.z + (e.z as f64) - 0.12);
+    vp_box(f, cam, clip, tw_mn, tw_mx, rgb(86, 84, 98), 256, true);
+    vp_box_wire(f, cam, clip, tw_mn, tw_mx, rgb(116, 114, 130));
+    let wl: i64 = wavelength_color(c.wl_nm);
+    let hd_c: Vec3 = v3(o.x + (e.x as f64) * 0.5, o.y + 1.55, o.z + (e.z as f64) * 0.5);
+    let hs: f64 = 0.3;
+    vp_box(f, cam, clip, v3(hd_c.x - hs, hd_c.y - hs, hd_c.z - hs), v3(hd_c.x + hs, hd_c.y + hs, hd_c.z + hs), wl, 256, true);
+    let d: Vox = comp_port_dir(c, 0);
+    let cell: Vox = comp_port_cell(c, 0);
+    let ctr: Vec3 = vox_center(cell);
+    let tip: Vec3 = v3(
+        ctr.x + (d.x as f64) * 0.85,
+        ctr.y,
+        ctr.z + (d.z as f64) * 0.85,
+    );
+    let bs: f64 = 0.09;
+    let bmn: Vec3 = v3(fmin(ctr.x, tip.x) - bs, ctr.y - bs, fmin(ctr.z, tip.z) - bs);
+    let bmx: Vec3 = v3(fmax(ctr.x, tip.x) + bs, ctr.y + bs, fmax(ctr.z, tip.z) + bs);
+    vp_box(f, cam, clip, bmn, bmx, wl, 130, false);
+}
+
+fn draw_detector(f: *FB, cam: Cam, clip: Rect, c: Comp) void {
+    let o: Vec3 = vx0(c.origin);
+    let mn: Vec3 = v3(o.x + 0.08, o.y, o.z + 0.08);
+    let mx: Vec3 = v3(o.x + 0.92, o.y + 0.14, o.z + 0.92);
+    vp_box(f, cam, clip, mn, mx, rgb(58, 48, 76), 256, true);
+    quad3d(f, clip, cam,
+        v3(o.x + 0.2, o.y + 0.152, o.z + 0.2),
+        v3(o.x + 0.8, o.y + 0.152, o.z + 0.2),
+        v3(o.x + 0.8, o.y + 0.152, o.z + 0.8),
+        v3(o.x + 0.2, o.y + 0.152, o.z + 0.8),
+        rgb(162, 132, 232), 256, true);
+    let d: Vox = comp_port_dir(c, 0);
+    let ctr: Vec3 = vox_center(c.origin);
+    let fx: f64 = ctr.x + (d.x as f64) * 0.46;
+    let fz: f64 = ctr.z + (d.z as f64) * 0.46;
+    let gmn: Vec3 = v3(fx - 0.06, o.y, fz - 0.3);
+    let gmx: Vec3 = v3(fx + 0.06, o.y + 0.2, fz + 0.3);
+    if (d.z != 0) {
+        gmn = v3(fx - 0.3, o.y, fz - 0.06);
+        gmx = v3(fx + 0.3, o.y + 0.2, fz + 0.06);
+    }
+    vp_box(f, cam, clip, gmn, gmx, rgb(218, 182, 98), 256, true);
+}
+
+// A waveguide drawn as slim beams colored by the trit currently arriving at
+// the sink (strict ternary code), with a rim accent so null guides stay legible.
+fn draw_guide(f: *FB, cam: Cam, clip: Rect, g: Guide, selected: bool) void {
+    let col: i64 = trit_color(g.live);
+    let rim: i64 = trit_rim(g.live);
+    if (selected) { rim = th_select(); }
+    let r: f64 = 0.1;
+    let i: i32 = 1;
+    while (i < g.path.len) {
+        let a: Vec3 = vox_center(list.get[Vox](g.path, i - 1));
+        let b: Vec3 = vox_center(list.get[Vox](g.path, i));
+        let mn: Vec3 = v3(fmin(a.x, b.x) - r, fmin(a.y, b.y) - r, fmin(a.z, b.z) - r);
+        let mx: Vec3 = v3(fmax(a.x, b.x) + r, fmax(a.y, b.y) + r, fmax(a.z, b.z) + r);
+        vp_box(f, cam, clip, mn, mx, col, 256, true);
+        i = i + 1;
+    }
+    let j: i32 = 1;
+    while (j < g.path.len) {
+        let a2: Vec3 = vox_center(list.get[Vox](g.path, j - 1));
+        let b2: Vec3 = vox_center(list.get[Vox](g.path, j));
+        let a3: Vec3 = v3(a2.x, a2.y + r, a2.z);
+        let b3: Vec3 = v3(b2.x, b2.y + r, b2.z);
+        line3(f, cam, clip, a3, b3, rim, false);
+        j = j + 1;
+    }
+}
+
+// ── picking ───────────────────────────────────────────────────────────────────
+
+fn vp_ray(cam: Cam, r: Rect, mx: i32, my: i32) Ray {
+    return ray_from_pixel(cam, r.w, r.h, mx - r.x, my - r.y);
+}
+
+fn comp_bounds_min(c: Comp) Vec3 {
+    return vx0(c.origin);
+}
+
+fn comp_bounds_max(c: Comp) Vec3 {
+    let e: Vox = comp_ext(c);
+    return v3(
+        (c.origin.x + e.x) as f64,
+        (c.origin.y + e.y) as f64,
+        (c.origin.z + e.z) as f64,
+    );
+}
+
+fn vp_pick_comp(s: *Scene, cam: Cam, r: Rect, mx: i32, my: i32) i32 {
+    let ray: Ray = vp_ray(cam, r, mx, my);
+    let best_id: i32 = 0 - 1;
+    let best_t: f64 = 1000000.0;
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        let c: Comp = s.*.comps.data[i];
+        if (c.visible) {
+            let mn: Vec3 = comp_bounds_min(c);
+            let mx2: Vec3 = comp_bounds_max(c);
+            let hit: RayHit = ray_aabb(ray, mn, mx2);
+            if (hit.hit && hit.t < best_t) {
+                best_t = hit.t;
+                best_id = c.id;
+            }
+        }
+        i = i + 1;
+    }
+    return best_id;
+}
+
+fn vp_pick_port(s: *Scene, cam: Cam, r: Rect, mx: i32, my: i32, port: *i32) i32 {
+    let ray: Ray = vp_ray(cam, r, mx, my);
+    let best_id: i32 = 0 - 1;
+    let best_t: f64 = 1000000.0;
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        let c: Comp = s.*.comps.data[i];
+        let np: i32 = kind_port_count(c.kind);
+        let pi: i32 = 0;
+        while (pi < np) {
+            let cell: Vox = comp_port_attach(c, pi);
+            let ctr: Vec3 = vox_center(cell);
+            let s2: f64 = 0.45;
+            let mn: Vec3 = v3(ctr.x - s2, ctr.y - s2, ctr.z - s2);
+            let mx2: Vec3 = v3(ctr.x + s2, ctr.y + s2, ctr.z + s2);
+            let hit: RayHit = ray_aabb(ray, mn, mx2);
+            if (hit.hit && hit.t < best_t) {
+                best_t = hit.t;
+                best_id = c.id;
+                port.* = pi;
+            }
+            pi = pi + 1;
+        }
+        i = i + 1;
+    }
+    return best_id;
+}
+
+struct CellHit {
+    ok: bool,
+    cell: Vox,
+}
+
+fn vp_cell_at(cam: Cam, r: Rect, mx: i32, my: i32, level: i32) CellHit {
+    let ray: Ray = vp_ray(cam, r, mx, my);
+    let hit: RayHit = ray_plane_y(ray, level as f64);
+    if (!hit.hit) {
+        return CellHit{ .ok = false, .cell = vox(0, 0, 0) };
+    }
+    return CellHit{
+        .ok = true,
+        .cell = vox(ifloor(hit.p.x), level, ifloor(hit.p.z)),
+    };
+}

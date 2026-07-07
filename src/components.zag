@@ -1,0 +1,184 @@
+// components.zag — the photonic hardware library.
+// Footprints, optical ports, and placement rules on the 250 nm voxel lattice.
+
+@import("voxel.zag")
+
+fn pitch_nm() f64 { return 250.0; }
+
+enum Kind {
+    Plate,     // GeSn base plate: substrate waffle grid, 8x8 lattice cells
+    Chamber,   // Execution chamber: reflective interference cavity, 3-in/1-out
+    Soh,       // SOH matrix tile: crystal memory plane (chamber integrator)
+    Emitter,   // WDM laser emitter: multi-wavelength ternary source @ 110 GHz
+    Detector,  // MoS2 photodetector: monolayer phase-discriminating readout
+}
+
+fn kind_count() i32 { return 5; }
+
+fn kind_index(k: Kind) i32 {
+    return switch (k) {
+        .Plate => 0,
+        .Chamber => 1,
+        .Soh => 2,
+        .Emitter => 3,
+        .Detector => 4,
+    };
+}
+
+fn kind_at(i: i32) Kind {
+    if (i == 1) { return Kind.Chamber; }
+    if (i == 2) { return Kind.Soh; }
+    if (i == 3) { return Kind.Emitter; }
+    if (i == 4) { return Kind.Detector; }
+    return Kind.Plate;
+}
+
+fn kind_name(k: Kind) []u8 {
+    return switch (k) {
+        .Plate => "GeSn Base Plate",
+        .Chamber => "Execution Chamber",
+        .Soh => "SOH Matrix Tile",
+        .Emitter => "WDM Laser Emitter",
+        .Detector => "MoS2 Photodetector",
+    };
+}
+
+fn kind_short(k: Kind) []u8 {
+    return switch (k) {
+        .Plate => "GeSn Plate",
+        .Chamber => "Exec Chamber",
+        .Soh => "SOH Tile",
+        .Emitter => "WDM Emitter",
+        .Detector => "MoS2 Sensor",
+    };
+}
+
+fn kind_blurb(k: Kind) []u8 {
+    return switch (k) {
+        .Plate => "Substrate waffle grid, 8x8 cells",
+        .Chamber => "Interference cavity, 3-in 1-out",
+        .Soh => "Crystal memory plane, integrates",
+        .Emitter => "Ternary phase source, 110 GHz",
+        .Detector => "Monolayer phase readout",
+    };
+}
+
+// Footprint extent in voxels at rotation 0.
+fn kind_fp(k: Kind) Vox {
+    return switch (k) {
+        .Plate => vox(8, 1, 8),
+        .Chamber => vox(2, 2, 2),
+        .Soh => vox(1, 2, 2),
+        .Emitter => vox(1, 2, 1),
+        .Detector => vox(1, 1, 1),
+    };
+}
+
+// Toolbar chip / outliner color (0x00RRGGBB as i64).
+fn kind_tint(k: Kind) i64 {
+    return switch (k) {
+        .Plate => 6318198,       // (96,104,118) steel gray
+        .Chamber => 11059414,    // (168,192,214) reflective silver-blue
+        .Soh => 9231615,         // (140,220,255) crystal cyan-white
+        .Emitter => 16755264,    // (255,170,64) laser amber
+        .Detector => 12482815,   // (190,120,255) monolayer violet
+    };
+}
+
+// Placement rules: plates sit on the lattice floor; everything else must rest
+// on a plate's top face (y == 1).
+fn kind_ground_only(k: Kind) bool {
+    return switch (k) {
+        .Plate => true,
+        .Chamber, .Soh, .Emitter, .Detector => false,
+    };
+}
+
+fn kind_needs_plate(k: Kind) bool {
+    return switch (k) {
+        .Plate => false,
+        .Chamber, .Soh, .Emitter, .Detector => true,
+    };
+}
+
+// ── optical ports ─────────────────────────────────────────────────────────────
+// A port lives on a face of the footprint: `cell` is the footprint-local voxel
+// owning it, `out` the unit face normal; a waveguide attaches at `cell + out`.
+
+struct Port {
+    cell: Vox,
+    out: Vox,
+    is_output: bool,
+    label: []u8,
+}
+
+fn kind_resizable(k: Kind) bool {
+    return switch (k) {
+        .Plate, .Chamber, .Soh => true,
+        .Emitter, .Detector => false,
+    };
+}
+
+fn kind_size_min(k: Kind) Vox {
+    return kind_fp(k);
+}
+
+fn kind_size_max(k: Kind) Vox {
+    return switch (k) {
+        .Plate => vox(128, 24, 128),
+        .Chamber => vox(8, 8, 8),
+        .Soh => vox(6, 8, 6),
+        .Emitter => vox(1, 2, 1),
+        .Detector => vox(1, 1, 1),
+    };
+}
+
+fn clamp_size(k: Kind, s: Vox) Vox {
+    let lo: Vox = kind_size_min(k);
+    let hi: Vox = kind_size_max(k);
+    let x: i32 = s.x;
+    if (x < lo.x) { x = lo.x; }
+    if (x > hi.x) { x = hi.x; }
+    let y: i32 = s.y;
+    if (y < lo.y) { y = lo.y; }
+    if (y > hi.y) { y = hi.y; }
+    let z: i32 = s.z;
+    if (z < lo.z) { z = lo.z; }
+    if (z > hi.z) { z = hi.z; }
+    return vox(x, y, z);
+}
+
+fn kind_port_count(k: Kind) i32 {
+    return switch (k) {
+        .Plate, .Soh => 0,
+        .Chamber => 4,
+        .Emitter, .Detector => 1,
+    };
+}
+
+fn kind_port(k: Kind, i: i32) Port {
+    if (k == Kind.Chamber) {
+        if (i == 0) { return Port{ .cell = vox(0, 1, 0), .out = vox(0 - 1, 0, 0), .is_output = false, .label = "IN.A" }; }
+        if (i == 1) { return Port{ .cell = vox(0, 1, 1), .out = vox(0, 0, 1), .is_output = false, .label = "IN.B" }; }
+        if (i == 2) { return Port{ .cell = vox(1, 1, 0), .out = vox(0, 0, 0 - 1), .is_output = false, .label = "IN.C" }; }
+        return Port{ .cell = vox(1, 1, 1), .out = vox(1, 0, 0), .is_output = true, .label = "OUT" };
+    }
+    if (k == Kind.Emitter) {
+        return Port{ .cell = vox(0, 1, 0), .out = vox(1, 0, 0), .is_output = true, .label = "BEAM" };
+    }
+    // Detector sense port (default arm also covers portless kinds safely).
+    return Port{ .cell = vox(0, 0, 0), .out = vox(0 - 1, 0, 0), .is_output = false, .label = "SENSE" };
+}
+
+// WDM channel color for an emitter wavelength (1530..1565 nm ITU C-band
+// mapped onto a vivid hue sweep for the viewport lens + debugger lanes).
+fn wavelength_color(wl_nm: f64) i64 {
+    let t: f64 = (wl_nm - 1530.0) / 35.0;
+    if (t < 0.0) { t = 0.0; }
+    if (t > 1.0) { t = 1.0; }
+    // sweep amber -> magenta -> blue
+    let r: i32 = (255.0 - t * 130.0) as i32;
+    let g: i32 = (180.0 - t * 140.0) as i32;
+    let b: i32 = (60.0 + t * 195.0) as i32;
+    return ((r * 65536) + (g * 256) + b) as i64;
+}

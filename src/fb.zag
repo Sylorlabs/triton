@@ -1,0 +1,328 @@
+// fb.zag — software framebuffer for Zag Photonics Architect.
+//
+// Pixels are i64 elements holding 0x00RRGGBB in the low 4 bytes; the buffer
+// is written verbatim to /dev/shm and the display shim compacts 8 -> 4 bytes.
+// A parallel i64 z-buffer (fixed-point depth, larger = nearer test inverted:
+// we store depth*1024, smaller wins) backs the 3D viewport region.
+
+@import("../std/list.zag") as list
+@import("../std/rt.zag")
+@import("fontdata.zag")
+
+struct FB {
+    px: list.ArrayList[i64],
+    zb: list.ArrayList[i64],
+    w: i32,
+    h: i32,
+    // active clip rect (inclusive min, exclusive max)
+    cx0: i32,
+    cy0: i32,
+    cx1: i32,
+    cy1: i32,
+}
+
+fn rgb(r: i32, g: i32, b: i32) i64 {
+    return ((r * 65536) + (g * 256) + b) as i64;
+}
+
+fn col_r(c: i64) i32 { return ((c as i32) >> 16) & 255; }
+fn col_g(c: i64) i32 { return ((c as i32) >> 8) & 255; }
+fn col_b(c: i64) i32 { return (c as i32) & 255; }
+
+// Linear blend: a over b with alpha 0..256.
+fn mix(a: i64, b: i64, alpha: i32) i64 {
+    let ia: i32 = 256 - alpha;
+    let r: i32 = (col_r(a) * alpha + col_r(b) * ia) >> 8;
+    let g: i32 = (col_g(a) * alpha + col_g(b) * ia) >> 8;
+    let bl: i32 = (col_b(a) * alpha + col_b(b) * ia) >> 8;
+    return rgb(r, g, bl);
+}
+
+// Scale color brightness by q/256.
+fn shade(c: i64, q: i32) i64 {
+    let r: i32 = (col_r(c) * q) >> 8;
+    let g: i32 = (col_g(c) * q) >> 8;
+    let b: i32 = (col_b(c) * q) >> 8;
+    if (r > 255) { r = 255; }
+    if (g > 255) { g = 255; }
+    if (b > 255) { b = 255; }
+    return rgb(r, g, b);
+}
+
+fn fb_new(w: i32, h: i32) FB {
+    let f: FB = FB{
+        .px = list.make[i64](w * h),
+        .zb = list.make[i64](w * h),
+        .w = w,
+        .h = h,
+        .cx0 = 0,
+        .cy0 = 0,
+        .cx1 = w,
+        .cy1 = h,
+    };
+    f.px.len = w * h;
+    f.zb.len = w * h;
+    return f;
+}
+
+fn fb_resize(f: *FB, w: i32, h: i32) void {
+    if (f.*.w == w && f.*.h == h) { return; }
+    list.free[i64](&f.*.px);
+    list.free[i64](&f.*.zb);
+    f.*.px = list.make[i64](w * h);
+    f.*.zb = list.make[i64](w * h);
+    f.*.px.len = w * h;
+    f.*.zb.len = w * h;
+    f.*.w = w;
+    f.*.h = h;
+    fb_clip_reset(f);
+}
+
+fn fb_clip(f: *FB, x0: i32, y0: i32, x1: i32, y1: i32) void {
+    f.*.cx0 = x0;
+    f.*.cy0 = y0;
+    f.*.cx1 = x1;
+    f.*.cy1 = y1;
+    if (f.*.cx0 < 0) { f.*.cx0 = 0; }
+    if (f.*.cy0 < 0) { f.*.cy0 = 0; }
+    if (f.*.cx1 > f.*.w) { f.*.cx1 = f.*.w; }
+    if (f.*.cy1 > f.*.h) { f.*.cy1 = f.*.h; }
+}
+
+fn fb_clip_reset(f: *FB) void {
+    fb_clip(f, 0, 0, f.*.w, f.*.h);
+}
+
+fn px_set(f: *FB, x: i32, y: i32, c: i64) void {
+    if (x < f.*.cx0 || x >= f.*.cx1 || y < f.*.cy0 || y >= f.*.cy1) { return; }
+    f.*.px.data[y * f.*.w + x] = c;
+}
+
+fn px_blend(f: *FB, x: i32, y: i32, c: i64, alpha: i32) void {
+    if (x < f.*.cx0 || x >= f.*.cx1 || y < f.*.cy0 || y >= f.*.cy1) { return; }
+    let idx: i32 = y * f.*.w + x;
+    f.*.px.data[idx] = mix(c, f.*.px.data[idx], alpha);
+}
+
+fn fill_rect(f: *FB, x: i32, y: i32, w: i32, h: i32, c: i64) void {
+    let x0: i32 = x;
+    let y0: i32 = y;
+    let x1: i32 = x + w;
+    let y1: i32 = y + h;
+    if (x0 < f.*.cx0) { x0 = f.*.cx0; }
+    if (y0 < f.*.cy0) { y0 = f.*.cy0; }
+    if (x1 > f.*.cx1) { x1 = f.*.cx1; }
+    if (y1 > f.*.cy1) { y1 = f.*.cy1; }
+    let yy: i32 = y0;
+    while (yy < y1) {
+        let base: i32 = yy * f.*.w;
+        let xx: i32 = x0;
+        while (xx + 4 <= x1) {
+            f.*.px.data[base + xx] = c;
+            f.*.px.data[base + xx + 1] = c;
+            f.*.px.data[base + xx + 2] = c;
+            f.*.px.data[base + xx + 3] = c;
+            xx = xx + 4;
+        }
+        while (xx < x1) {
+            f.*.px.data[base + xx] = c;
+            xx = xx + 1;
+        }
+        yy = yy + 1;
+    }
+}
+
+fn blend_rect(f: *FB, x: i32, y: i32, w: i32, h: i32, c: i64, alpha: i32) void {
+    let x0: i32 = x;
+    let y0: i32 = y;
+    let x1: i32 = x + w;
+    let y1: i32 = y + h;
+    if (x0 < f.*.cx0) { x0 = f.*.cx0; }
+    if (y0 < f.*.cy0) { y0 = f.*.cy0; }
+    if (x1 > f.*.cx1) { x1 = f.*.cx1; }
+    if (y1 > f.*.cy1) { y1 = f.*.cy1; }
+    let yy: i32 = y0;
+    while (yy < y1) {
+        let base: i32 = yy * f.*.w;
+        let xx: i32 = x0;
+        while (xx < x1) {
+            f.*.px.data[base + xx] = mix(c, f.*.px.data[base + xx], alpha);
+            xx = xx + 1;
+        }
+        yy = yy + 1;
+    }
+}
+
+fn rect_outline(f: *FB, x: i32, y: i32, w: i32, h: i32, c: i64) void {
+    fill_rect(f, x, y, w, 1, c);
+    fill_rect(f, x, y + h - 1, w, 1, c);
+    fill_rect(f, x, y, 1, h, c);
+    fill_rect(f, x + w - 1, y, 1, h, c);
+}
+
+fn hline(f: *FB, x: i32, y: i32, w: i32, c: i64) void {
+    fill_rect(f, x, y, w, 1, c);
+}
+
+fn vline(f: *FB, x: i32, y: i32, h: i32, c: i64) void {
+    fill_rect(f, x, y, 1, h, c);
+}
+
+// Bresenham 2D line.
+fn line2d(f: *FB, x0_: i32, y0_: i32, x1_: i32, y1_: i32, c: i64) void {
+    let x0: i32 = x0_;
+    let y0: i32 = y0_;
+    let x1: i32 = x1_;
+    let y1: i32 = y1_;
+    let dx: i32 = x1 - x0;
+    if (dx < 0) { dx = 0 - dx; }
+    let dy: i32 = y1 - y0;
+    if (dy < 0) { dy = 0 - dy; }
+    dy = 0 - dy;
+    let sx: i32 = 1;
+    if (x0 > x1) { sx = 0 - 1; }
+    let sy: i32 = 1;
+    if (y0 > y1) { sy = 0 - 1; }
+    let err: i32 = dx + dy;
+    let running: bool = true;
+    while (running) {
+        px_set(f, x0, y0, c);
+        if (x0 == x1 && y0 == y1) {
+            running = false;
+        } else {
+            let e2: i32 = err * 2;
+            if (e2 >= dy) {
+                err = err + dy;
+                x0 = x0 + sx;
+            }
+            if (e2 <= dx && running) {
+                err = err + dx;
+                y0 = y0 + sy;
+            }
+        }
+    }
+}
+
+// ── text ─────────────────────────────────────────────────────────────────────
+
+fn draw_char(f: *FB, x: i32, y: i32, ch: i32, c: i64, scale: i32) void {
+    let row: i32 = 0;
+    while (row < 9) {
+        let bits: i32 = font_row(ch, row);
+        let col: i32 = 0;
+        while (col < 5) {
+            if (((bits >> (4 - col)) & 1) == 1) {
+                if (scale == 1) {
+                    px_set(f, x + col, y + row, c);
+                } else {
+                    fill_rect(f, x + col * scale, y + row * scale, scale, scale, c);
+                }
+            }
+            col = col + 1;
+        }
+        row = row + 1;
+    }
+}
+
+fn draw_text(f: *FB, x: i32, y: i32, s: []u8, c: i64) void {
+    let i: i32 = 0;
+    while (i < s.len) {
+        draw_char(f, x + i * 6, y, s[i] as i32, c, 1);
+        i = i + 1;
+    }
+}
+
+fn draw_text_scaled(f: *FB, x: i32, y: i32, s: []u8, c: i64, scale: i32) void {
+    let i: i32 = 0;
+    while (i < s.len) {
+        draw_char(f, x + i * 6 * scale, y, s[i] as i32, c, scale);
+        i = i + 1;
+    }
+}
+
+fn text_w(s: []u8) i32 {
+    return s.len * 6;
+}
+
+// draw integer as text; returns width drawn
+fn draw_int(f: *FB, x: i32, y: i32, v: i64, c: i64) i32 {
+    let s: []u8 = _zag_i64_to_str(v);
+    draw_text(f, x, y, s, c);
+    return text_w(s);
+}
+
+// ── output ───────────────────────────────────────────────────────────────────
+
+// Raw dump for the display shim: w*h i64 (low 4 bytes = 0RGB), tight.
+fn fb_write_shm(f: *FB, path: []u8) void {
+    let raw: *i8 = f.*.px.data as *i8;
+    let bytes: []u8 = raw[0..f.*.w * f.*.h * 8];
+    let rc: i32 = _zag_write_file(path, bytes);
+    if (rc != 0) { _zag_eprintln("fb: /dev/shm write failed"); }
+}
+
+// BMP screenshot (24-bit, bottom-up) for smoke verification.
+fn fb_write_bmp(f: *FB, path: []u8) void {
+    let w: i32 = f.*.w;
+    let h: i32 = f.*.h;
+    let row_bytes: i32 = w * 3;
+    let pad: i32 = (4 - (row_bytes % 4)) % 4;
+    let data_size: i32 = (row_bytes + pad) * h;
+    let file_size: i32 = 54 + data_size;
+
+    let out: list.ArrayList[u8] = list.make[u8](file_size);
+    push_u8(&out, 66);  // 'B'
+    push_u8(&out, 77);  // 'M'
+    push_u32le(&out, file_size);
+    push_u32le(&out, 0);
+    push_u32le(&out, 54);
+    push_u32le(&out, 40);
+    push_u32le(&out, w);
+    push_u32le(&out, h);
+    push_u16le(&out, 1);
+    push_u16le(&out, 24);
+    push_u32le(&out, 0);
+    push_u32le(&out, data_size);
+    push_u32le(&out, 2835);
+    push_u32le(&out, 2835);
+    push_u32le(&out, 0);
+    push_u32le(&out, 0);
+
+    let y: i32 = h - 1;
+    while (y >= 0) {
+        let x: i32 = 0;
+        while (x < w) {
+            let c: i64 = f.*.px.data[y * w + x];
+            push_u8(&out, col_b(c) as u8);
+            push_u8(&out, col_g(c) as u8);
+            push_u8(&out, col_r(c) as u8);
+            x = x + 1;
+        }
+        let p: i32 = 0;
+        while (p < pad) {
+            push_u8(&out, 0);
+            p = p + 1;
+        }
+        y = y - 1;
+    }
+    let bytes: []u8 = out.data[0..out.len];
+    let rc: i32 = _zag_write_file(path, bytes);
+    if (rc != 0) { _zag_eprintln("fb: bmp write failed"); }
+    list.free[u8](&out);
+}
+
+fn push_u8(out: *list.ArrayList[u8], v: u8) void {
+    list.push[u8](out, v);
+}
+
+fn push_u16le(out: *list.ArrayList[u8], v: i32) void {
+    push_u8(out, (v & 255) as u8);
+    push_u8(out, ((v >> 8) & 255) as u8);
+}
+
+fn push_u32le(out: *list.ArrayList[u8], v: i32) void {
+    push_u8(out, (v & 255) as u8);
+    push_u8(out, ((v >> 8) & 255) as u8);
+    push_u8(out, ((v >> 16) & 255) as u8);
+    push_u8(out, ((v >> 24) & 255) as u8);
+}

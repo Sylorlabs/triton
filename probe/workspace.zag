@@ -1,0 +1,151 @@
+// workspace.zag — panel rendering + per-frame orchestration.
+// Menu bar, toolbar, outliner, signal debugger, viewport composition,
+// status bar, and the modal dialogs (Open / Save As / Shortcuts).
+
+@import("../std/list.zag") as list
+@import("app.zag")
+
+fn fmt_i(v: i64) []u8 {
+    return _zag_i64_to_str(v);
+}
+
+// ── command dispatch (menus + shortcuts route here) ───────────────────────────
+// 1 new / 2 open / 3 save / 4 save-as / 5 quit
+// 10 undo / 11 redo / 12 duplicate / 13 delete / 14 deselect
+// 20 frame-sel / 21 frame-all / 22 top / 23 front / 24 right / 25 perspective
+// 30 shortcuts / 31 demo design
+
+fn app_action(a: *App, code: i32) void {
+    a.*.menu = 0 - 1;
+    if (code == 1) { app_new_design(a); }
+    if (code == 2) { app_show_open(a); }
+    if (code == 3) { app_save(a); }
+    if (code == 4) { app_show_saveas(a); }
+    if (code == 5) { a.*.quit = true; }
+    if (code == 10) { app_undo(a); }
+    if (code == 11) { app_redo(a); }
+    if (code == 12) { app_duplicate(a); }
+    if (code == 13) { app_delete_selection(a); }
+    if (code == 14) { sel_clear(a); }
+    if (code == 20) { app_frame_selected(a); }
+    if (code == 21) { app_frame_all(a); }
+    if (code == 22) {
+        a.*.cam.yaw = 0.0 - 1.5707963;
+        a.*.cam.pitch = 1.51;
+    }
+    if (code == 23) {
+        a.*.cam.yaw = 0.0 - 1.5707963;
+        a.*.cam.pitch = 0.06;
+    }
+    if (code == 24) {
+        a.*.cam.yaw = 0.0;
+        a.*.cam.pitch = 0.06;
+    }
+    if (code == 25) {
+        a.*.cam.yaw = 0.9;
+        a.*.cam.pitch = 0.62;
+    }
+    if (code == 30) { a.*.modal = modal_keys(); }
+    if (code == 31) { app_action_demo(a); }
+}
+
+// small demo design (also used by --smoke); placed through the normal APIs
+fn app_action_demo(a: *App) void {
+    let s: *Scene = a.*.scene;
+    let pa: i32 = scene_place(s, Kind.Plate, vox(6, 0, 10), 0);
+    let _pb: i32 = scene_place(s, Kind.Plate, vox(20, 0, 10), 0);
+    if (pa < 0) {
+        app_log(a, "demo needs empty space near the origin");
+        return;
+    }
+    let e1: i32 = scene_place(s, Kind.Emitter, vox(7, 1, 12), 0);
+    let e2: i32 = scene_place(s, Kind.Emitter, vox(7, 1, 15), 0);
+    let e3: i32 = scene_place(s, Kind.Emitter, vox(7, 1, 17), 0);
+    let ch1: i32 = scene_place(s, Kind.Chamber, vox(11, 1, 13), 0);
+    let _soh: i32 = scene_place(s, Kind.Soh, vox(11, 1, 15), 0);
+    let ch2: i32 = scene_place(s, Kind.Chamber, vox(21, 1, 15), 0);
+    let d1: i32 = scene_place(s, Kind.Detector, vox(24, 1, 14), 0);
+    let d2: i32 = scene_place(s, Kind.Detector, vox(26, 1, 12), 0);
+    demo_route(a, e1, 0, ch1, 0);
+    demo_route(a, e2, 0, ch1, 1);
+    demo_route(a, ch1, 3, d1, 0);
+    demo_route(a, e3, 0, ch2, 1);
+    demo_route(a, ch2, 3, d2, 0);
+    app_frame_all(a);
+    app_mark_dirty(a);
+    app_log(a, "demo design loaded");
+}
+
+fn demo_route(a: *App, fc: i32, fp: i32, tc: i32, tp: i32) void {
+    let s: *Scene = a.*.scene;
+    if (fc < 0 || tc < 0) { return; }
+    let fi: i32 = scene_comp_index(s, fc);
+    let ti: i32 = scene_comp_index(s, tc);
+    if (fi < 0 || ti < 0) { return; }
+    let src: Comp = s.*.comps.data[fi];
+    let dst: Comp = s.*.comps.data[ti];
+    let start: Vox = comp_port_attach(src, fp);
+    let goal: Vox = comp_port_attach(dst, tp);
+    let path: list.ArrayList[Vox] = list.make[Vox](32);
+    if (route_guide(s, start, goal, &path)) {
+        let _gid: i32 = scene_add_guide(s, fc, fp, tc, tp, path);
+    } else {
+        list.free[Vox](&path);
+    }
+}
+
+// ── menu bar ──────────────────────────────────────────────────────────────────
+
+struct MenuItem {
+    label: []u8,
+    hint: []u8,
+    code: i32,     // 0 = separator
+}
+
+fn menu_title(m: i32) []u8 {
+    if (m == 0) { return "File"; }
+    if (m == 1) { return "Edit"; }
+    if (m == 2) { return "View"; }
+    return "Help";
+}
+
+fn menu_items(m: i32, out: *list.ArrayList[MenuItem]) void {
+    out.*.len = 0;
+    if (m == 0) {
+        list.push[MenuItem](out, MenuItem{ .label = "New", .hint = "Ctrl+N", .code = 1 });
+        list.push[MenuItem](out, MenuItem{ .label = "Open...", .hint = "Ctrl+O", .code = 2 });
+        list.push[MenuItem](out, MenuItem{ .label = "", .hint = "", .code = 0 });
+        list.push[MenuItem](out, MenuItem{ .label = "Save", .hint = "Ctrl+S", .code = 3 });
+        list.push[MenuItem](out, MenuItem{ .label = "Save As...", .hint = "Ctrl+Shift+S", .code = 4 });
+        list.push[MenuItem](out, MenuItem{ .label = "", .hint = "", .code = 0 });
+        list.push[MenuItem](out, MenuItem{ .label = "Quit", .hint = "Ctrl+Q", .code = 5 });
+    }
+    if (m == 1) {
+        list.push[MenuItem](out, MenuItem{ .label = "Undo", .hint = "Ctrl+Z", .code = 10 });
+        list.push[MenuItem](out, MenuItem{ .label = "Redo", .hint = "Ctrl+Y", .code = 11 });
+        list.push[MenuItem](out, MenuItem{ .label = "", .hint = "", .code = 0 });
+        list.push[MenuItem](out, MenuItem{ .label = "Duplicate", .hint = "Shift+D", .code = 12 });
+        list.push[MenuItem](out, MenuItem{ .label = "Delete", .hint = "X", .code = 13 });
+        list.push[MenuItem](out, MenuItem{ .label = "Deselect", .hint = "Esc", .code = 14 });
+    }
+    if (m == 2) {
+        list.push[MenuItem](out, MenuItem{ .label = "Frame Selected", .hint = "F", .code = 20 });
+        list.push[MenuItem](out, MenuItem{ .label = "Frame All", .hint = "Home", .code = 21 });
+        list.push[MenuItem](out, MenuItem{ .label = "", .hint = "", .code = 0 });
+        list.push[MenuItem](out, MenuItem{ .label = "Top", .hint = "", .code = 22 });
+        list.push[MenuItem](out, MenuItem{ .label = "Front", .hint = "", .code = 23 });
+        list.push[MenuItem](out, MenuItem{ .label = "Right", .hint = "", .code = 24 });
+        list.push[MenuItem](out, MenuItem{ .label = "Perspective", .hint = "", .code = 25 });
+    }
+    if (m == 3) {
+        list.push[MenuItem](out, MenuItem{ .label = "Shortcuts", .hint = "", .code = 30 });
+        list.push[MenuItem](out, MenuItem{ .label = "Load Demo Design", .hint = "F1", .code = 31 });
+    }
+}
+
+fn draw_menubar(a: *App) void {
+    let f: *FB = &a.*.f;
+    let inp: *Input = &a.*.inp;
+    let r: Rect = zone_menu(a);
+    fill_rect(f, r.x, r.y, r.w, r.h, th_header());
+... 867 lines not shown ...

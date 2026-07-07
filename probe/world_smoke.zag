@@ -1,0 +1,22 @@
+@import("../src/scene.zag")
+@import("../src/world.zag")
+
+fn main() i32 {
+    let s: *Scene = scene_new();
+    let cc: ChunkCoords = world_chunk_at(vox(0, 0, 0));
+    let ch: *Chunk = world_ensure_chunk(s.*.world, cc);
+    if (ch == null) {
+        _zag_println("chunk null");
+        return 1;
+    }
+    world_touch_vox(s.*.world, vox(0, 0, 0), 1);
+    let id: i32 = scene_place(s, Kind.Plate, vox(0, 0, 0), 0);
+    if (id < 0) {
+        _zag_println("place failed");
+        return 2;
+    }
+    let out: list.ArrayList[i32] = list.make[i32](8);
+    world_query_aabb(s.*.world, vox(0, 0, 0), vox(10, 2, 10), &out);
+    _zag_println("ok");
+    return 0;
+}

@@ -1,0 +1,36 @@
+@import("../std/hashmap.zag") as hm
+@import("../src/voxel.zag")
+
+fn main() i32 {
+    let ka: i64 = vox_key(vox(1, 2, 1));
+    let kb: i64 = vox_key(vox(2, 2, 1));
+    let kz: i64 = 99999999999;
+    let empty: hm.Int64Map[i32] = hm.int64_make[i32](16);
+    let ge: ?i32 = hm.int64_get[i32](empty, ka);
+    _zag_print("empty get null? "); _zag_println(_zag_i64_to_str((ge == null) as i64));
+    hm.int64_free[i32](&empty);
+
+    let m: hm.Int64Map[i32] = hm.int64_make[i32](16);
+    hm.int64_put[i32](&m, ka, 42);
+    let ga: ?i32 = hm.int64_get[i32](m, ka);
+    let gb: ?i32 = hm.int64_get[i32](m, kb);
+    let gz: ?i32 = hm.int64_get[i32](m, kz);
+    _zag_print("ga null? "); _zag_println(_zag_i64_to_str((ga == null) as i64));
+    _zag_print("gb null? "); _zag_println(_zag_i64_to_str((gb == null) as i64));
+    _zag_print("gz null? "); _zag_println(_zag_i64_to_str((gz == null) as i64));
+    if (ga != null) {
+        let v: i32 = ga orelse 0;
+        _zag_print("ga val="); _zag_println(_zag_i64_to_str(v as i64));
+    }
+    if (gb != null) {
+        let v: i32 = gb orelse 0;
+        _zag_print("gb val="); _zag_println(_zag_i64_to_str(v as i64));
+    }
+    let ob: i32 = gb orelse (0 - 1);
+    _zag_print("gb orelse="); _zag_println(_zag_i64_to_str(ob as i64));
+    _zag_print("has a="); _zag_println(_zag_i64_to_str(hm.int64_has[i32](m, ka) as i64));
+    _zag_print("has b="); _zag_println(_zag_i64_to_str(hm.int64_has[i32](m, kb) as i64));
+    _zag_print("has z="); _zag_println(_zag_i64_to_str(hm.int64_has[i32](m, kz) as i64));
+    hm.int64_free[i32](&m);
+    return 0;
+}

@@ -1,0 +1,101 @@
+// selfhost/ast.zag — the Zag AST, written in Zag.
+//
+// A tagged-union `Node` over heap pointers (*Node), with child lists held as
+// ArrayList[*Node]. Type annotations are kept as []u8 strings (same as the
+// bootstrap Zig compiler). Optional children use an i32 flag + a valid pointer
+// rather than ?*Node, to keep traversal switches simple.
+
+@import("../std/list.zag")
+
+// `eff` carries a function-type's effect-row annotation when the param/field
+// type is `fn(...)... @realtime` / `... ! e` / `... ! pure` (else ""). The
+// effect checker reads it; codegen ignores it (pty stays the canonical type).
+// `calign` (>0) is the cache-line alignment requested by a `@cacheAlign(N)`
+// prefix on a struct field; codegen emits `_Alignas(N)`. 0 = no alignment.
+struct Param { name: []u8, pty: []u8, eff: []u8, calign: i32 }
+struct FieldInit { name: []u8, val: *Node }
+
+// ── type declarations ───────────────────────────────────────────────────────
+struct StructDecl { name: []u8, fields: ArrayList[Param], tparams: ArrayList[[]u8], is_pub: i32 }
+struct EnumDecl   { name: []u8, members: ArrayList[[]u8] }
+struct UnionDecl  { name: []u8, fields: ArrayList[Param] }
+
+// ── statement payloads ──────────────────────────────────────────────────────
+struct FnDecl {
+    name:      []u8,
+    tparams:   ArrayList[[]u8],   // generic type-parameter names (empty if non-generic)
+    params:    ArrayList[Param],
+    ret:       []u8,
+    annots:    ArrayList[[]u8],   // capability/effect annotations (@realtime, @alloc, ...)
+    body:      ArrayList[*Node],
+    is_extern: i32,
+    ret_eff:   []u8,              // effect row of the return type if it is a fn type (else "")
+    caps:      i32,               // capture count (>0 only for hoisted capturing closures)
+    cap_names: []u8,             // comma-joined capture names (hoisted capturing closures)
+    cap_types: []u8,             // comma-joined capture C/Zag types (filled by codegen's fn-value pass)
+    line:      i32,              // source line of the fn keyword (0 = synthetic)
+    is_pub:    i32,               // 1 if declared with `pub` keyword (module public API), else 0
+}
+struct Let    { name: []u8, dty: []u8, has_dty: i32, has_init: i32, expr: *Node, eff: []u8, calign: i32 }
+struct Return { has_expr: i32, expr: *Node }
+struct If     { cond: *Node, then_body: ArrayList[*Node], els_body: ArrayList[*Node], has_els: i32, cap: []u8, has_cap: i32 }
+struct While  { cond: *Node, body: ArrayList[*Node], cap: []u8, has_cap: i32 }
+struct Assign { target: *Node, expr: *Node }
+struct ExprStmt { expr: *Node }
+
+// switch arm: one or more `.tag` patterns, an optional `|cap|` capture, and a
+// block body. (else arm is stored separately on the Switch.)
+struct SwitchArm {
+    tags:    ArrayList[[]u8],
+    cap:     []u8,
+    has_cap: i32,
+    body:    ArrayList[*Node],
+}
+struct Switch {
+    subject:  *Node,
+    arms:     ArrayList[SwitchArm],
+    els_body: ArrayList[*Node],
+    has_els:  i32,
+}
+
+// ── expression payloads ─────────────────────────────────────────────────────
+struct IntLit { text: []u8 }
+struct StrLit { text: []u8 }
+struct Ident  { name: []u8 }
+struct Bin    { op: []u8, l: *Node, r: *Node }
+struct Un     { op: []u8, e: *Node }
+struct Call   { callee: *Node, args: ArrayList[*Node], targs: ArrayList[[]u8] }
+// ptr_base: set by the codegen type pass — 1 if `base` is a raw pointer/array
+// (index directly), 0 if a []T slice value (index via .ptr). See codegen.zag.
+struct Index  { base: *Node, idx: *Node, ptr_base: i32 }
+struct Field  { base: *Node, fname: []u8 }
+struct StructLit { sname: []u8, fields: ArrayList[FieldInit], targs: ArrayList[[]u8] }
+struct Cast   { expr: *Node, target: []u8 }
+struct Slice  { base: *Node, lo: *Node, hi: *Node, has_hi: i32, ptr_base: i32 }
+struct LinkDir { lib: []u8 }
+
+// ── the node union (must be declared last: variants hold the structs above) ──
+union Node {
+    fn_decl: FnDecl,
+    let_:    Let,
+    ret:     Return,
+    if_:     If,
+    while_:  While,
+    assign:  Assign,
+    estmt:   ExprStmt,
+    switch_: Switch,
+    ilit:    IntLit,
+    slit:    StrLit,
+    id:      Ident,
+    bin:     Bin,
+    un:      Un,
+    call:    Call,
+    idx:     Index,
+    fld:     Field,
+    slit_:   StructLit,
+    cast_:   Cast,
+    slice_:  Slice,
+    struct_: StructDecl,
+    enum_:   EnumDecl,
+    union_:  UnionDecl,
+... 68 lines not shown ...

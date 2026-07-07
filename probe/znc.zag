@@ -1,0 +1,31 @@
+// selfhost/native/znc.zag — the NATIVE-backend CLI driver.
+//
+//   znc <source.zag> [-o <out>] [--run]
+//
+// Compiles Zag source straight to a runnable native x86-64 ELF:
+//
+//   source ──parse──▶ AST ──ncodegen──▶ x86-64 instrs ──x86 encode──▶ machine
+//   code ──elf──▶ ELF executable.
+//
+// There is NO cc / as / ld / libc / LLVM anywhere in this pipeline — every
+// stage is Zag (this driver + ncodegen.zag + x86.zag + elf.zag). The emitted
+// binary is statically linked, has no interpreter, and exits via a raw syscall.
+
+@import("x86.zag")        // encode(ArrayList[Instr]) -> ArrayList[u8]
+@import("elf.zag")        // write_elf_exec_data / write_elf_exec_data_lib
+@import("regalloc.zag")   // regalloc(ArrayList[Instr]) -> ArrayList[Instr] (register promotion)
+@import("optimize.zag")   // optimize(ArrayList[Instr]) -> ArrayList[Instr] (fold/stack-elim/DCE)
+@import("peephole.zag")   // peephole(ArrayList[Instr]) -> ArrayList[Instr] (optimizer)
+@import("ncodegen.zag")   // lower_program(decls, *errcount, *databuf) -> ArrayList[Instr]
+@import("../sema.zag")    // analyze(decls)->eff  report_violations(decls,eff)->i32
+@import("ar.zag")         // ar_symbol_table, ar_entry_data (GNU ar reader)
+@import("elf_obj.zag")    // elf_obj_parse, merge_obj, apply_relocs, MergedLib
+@import("zagmod.zag")     // zagmod_parse, ZagMod (zag.mod manifest reader)
+@import("dwarf.zag")      // optional DWARF sections for --debug builds
+@import("../fmt.zag")     // native Zag source formatter
+@import("../version.zag") // zag_version / zag_edition
+@import("../smt.zag")     // @total SMT discharge (kept out of sema.zag for lean bootstrap)
+@import("../mlir.zag")    // GPU MLIR emitter (lean — no codegen.zag dependency)
+@import("wasm.zag")       // WASM binary emitter
+@import("acodegen.zag")   // AArch64 lean codegen (--target arm64 only)
+... 1068 lines not shown ...

@@ -1,0 +1,271 @@
+// io_chunks.zag — chunked design I/O keyed by world 32³ chunks.
+// Format zpa 2 streams components per spatial chunk, then a trailing guides
+// section, so loaders can apply one region at a time without holding the full
+// design in a single parse buffer. zpa 1 monolithic files remain readable.
+
+@import("../std/list.zag") as list
+@import("voxel.zag")
+@import("components.zag")
+@import("scene.zag")
+@import("world.zag")
+
+fn ser_int(out: *list.ArrayList[u8], v: i64) void {
+    let s: []u8 = _zag_i64_to_str(v);
+    let i: i32 = 0;
+    while (i < s.len) {
+        list.push[u8](out, s[i]);
+        i = i + 1;
+    }
+    list.push[u8](out, 32);
+}
+
+fn ser_text(out: *list.ArrayList[u8], s: []u8) void {
+    let i: i32 = 0;
+    while (i < s.len) {
+        list.push[u8](out, s[i]);
+        i = i + 1;
+    }
+}
+
+fn chunk_key_eq(a: ChunkCoords, b: ChunkCoords) bool {
+    return a.cx == b.cx && a.cy == b.cy && a.cz == b.cz;
+}
+
+fn chunk_list_find(chunks: *list.ArrayList[ChunkCoords], cc: ChunkCoords) i32 {
+    let i: i32 = 0;
+    while (i < chunks.*.len) {
+        let c: ChunkCoords = chunks.*.data[i];
+        if (chunk_key_eq(c, cc)) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+fn chunk_list_push_unique(chunks: *list.ArrayList[ChunkCoords], cc: ChunkCoords) void {
+    if (chunk_list_find(chunks, cc) < 0) {
+        list.push[ChunkCoords](chunks, cc);
+    }
+}
+
+fn ser_comp_line(out: *list.ArrayList[u8], c: Comp) void {
+    ser_text(out, "c ");
+    ser_int(out, c.id as i64);
+    ser_int(out, kind_index(c.kind) as i64);
+    ser_int(out, c.origin.x as i64);
+    ser_int(out, c.origin.y as i64);
+    ser_int(out, c.origin.z as i64);
+    ser_int(out, c.rot as i64);
+    let vis: i64 = 0;
+    if (c.visible) { vis = 1; }
+    ser_int(out, vis);
+    ser_int(out, c.preset as i64);
+    ser_int(out, (c.wl_nm * 1000.0) as i64);
+    ser_text(out, "|");
+    ser_text(out, c.name_);
+    ser_text(out, "\n");
+}
+
+fn ser_guide_line(out: *list.ArrayList[u8], g: Guide) void {
+    ser_text(out, "g ");
+    ser_int(out, g.id as i64);
+    ser_int(out, g.from_c as i64);
+    ser_int(out, g.from_p as i64);
+    ser_int(out, g.to_c as i64);
+    ser_int(out, g.to_p as i64);
+    ser_int(out, g.path.len as i64);
+    let pi: i32 = 0;
+    while (pi < g.path.len) {
+        let v: Vox = list.get[Vox](g.path, pi);
+        ser_int(out, v.x as i64);
+        ser_int(out, v.y as i64);
+        ser_int(out, v.z as i64);
+        pi = pi + 1;
+    }
+    ser_text(out, "\n");
+}
+
+// Write zpa 2: meta, per-chunk component blocks, trailing guides.
+fn io_design_save_chunked(s: *Scene, path: []u8) bool {
+    let out: list.ArrayList[u8] = list.make[u8](2048);
+    ser_text(&out, "zpa 2\n");
+    ser_text(&out, "meta ");
+    ser_int(&out, s.*.next_comp as i64);
+    ser_int(&out, s.*.next_guide as i64);
+    ser_text(&out, "\n");
+
+    let chunks: list.ArrayList[ChunkCoords] = list.make[ChunkCoords](32);
+    let ci: i32 = 0;
+    while (ci < s.*.comps.len) {
+        chunk_list_push_unique(&chunks, scene_comp_chunk(s.*.comps.data[ci]));
+        ci = ci + 1;
+    }
+
+    let ck: i32 = 0;
+    while (ck < chunks.len) {
+        let cc: ChunkCoords = chunks.data[ck];
+        ser_text(&out, "chunk ");
+        ser_int(&out, cc.cx as i64);
+        ser_int(&out, cc.cy as i64);
+        ser_int(&out, cc.cz as i64);
+        ser_text(&out, "\n");
+        let cj: i32 = 0;
+        while (cj < s.*.comps.len) {
+            let c2: Comp = s.*.comps.data[cj];
+            if (chunk_key_eq(scene_comp_chunk(c2), cc)) {
+                ser_comp_line(&out, c2);
+            }
+            cj = cj + 1;
+        }
+        ser_text(&out, "@end\n");
+        ck = ck + 1;
+    }
+
+    ser_text(&out, "guides\n");
+    let gi: i32 = 0;
+    while (gi < s.*.guides.len) {
+        ser_guide_line(&out, s.*.guides.data[gi]);
+        gi = gi + 1;
+    }
+    ser_text(&out, "@end\n");
+
+    let bytes: []u8 = out.data[0..out.len];
+    let rc: i32 = _zag_write_file(path, bytes);
+    list.free[ChunkCoords](&chunks);
+    list.free[u8](&out);
+    return rc == 0;
+}
+
+fn parse_line_ints(line: []u8, from: i32, out: *list.ArrayList[i64], stop: *i32) void {
+    out.*.len = 0;
+    let i: i32 = from;
+    let done: bool = false;
+    while (i < line.len && !done) {
+        while (i < line.len && (line[i] as i32) == 32) { i = i + 1; }
+        if (i < line.len && (line[i] as i32) == '|') {
+            done = true;
+        } else {
+            let st: i32 = i;
+            while (i < line.len && (line[i] as i32) != 32 && (line[i] as i32) != '|') { i = i + 1; }
+            if (i > st) { list.push[i64](out, _zag_str_to_i64(line[st..i])); }
+            else { done = true; }
+        }
+    }
+    stop.* = i;
+}
+
+fn io_parse_comp_line(s: *Scene, line: []u8, nums: *list.ArrayList[i64], counts: *list.ArrayList[i32]) bool {
+    let stop: i32 = 0;
+    parse_line_ints(line, 1, nums, &stop);
+    if (nums.*.len < 9) { return false; }
+    let name_: []u8 = "part";
+    if (stop < line.len && (line[stop] as i32) == '|') {
+        name_ = _zag_strdup(line[stop + 1..line.len]);
+    }
+    let kidx: i32 = list.get[i64](nums.*, 1) as i32;
+    let c: Comp = Comp{
+        .id = list.get[i64](nums.*, 0) as i32,
+        .kind = kind_at(kidx),
+        .origin = vox(list.get[i64](nums.*, 2) as i32, list.get[i64](nums.*, 3) as i32, list.get[i64](nums.*, 4) as i32),
+        .rot = list.get[i64](nums.*, 5) as i32,
+        .visible = list.get[i64](nums.*, 6) == 1,
+        .wl_nm = (list.get[i64](nums.*, 8) as f64) / 1000.0,
+        .preset = list.get[i64](nums.*, 7) as i32,
+        .name_ = name_,
+    };
+    scene_restore_comp(s, c);
+    list.set[i32](counts, kidx, list.get[i32](counts.*, kidx) + 1);
+    return true;
+}
+
+fn io_parse_guide_line(s: *Scene, line: []u8, nums: *list.ArrayList[i64]) bool {
+    let stop2: i32 = 0;
+    parse_line_ints(line, 1, nums, &stop2);
+    if (nums.*.len < 6) { return false; }
+    let n: i32 = list.get[i64](nums.*, 5) as i32;
+    if (nums.*.len < 6 + n * 3) { return false; }
+    let p: list.ArrayList[Vox] = list.make[Vox](n + 1);
+    let vi: i32 = 0;
+    while (vi < n) {
+        list.push[Vox](&p, vox(
+            list.get[i64](nums.*, 6 + vi * 3) as i32,
+            list.get[i64](nums.*, 7 + vi * 3) as i32,
+            list.get[i64](nums.*, 8 + vi * 3) as i32,
+        ));
+        vi = vi + 1;
+    }
+    let steps: i32 = n - 1;
+    if (steps < 0) { steps = 0; }
+    let g: Guide = Guide{
+        .id = list.get[i64](nums.*, 0) as i32,
+        .from_c = list.get[i64](nums.*, 1) as i32,
+        .from_p = list.get[i64](nums.*, 2) as i32,
+        .to_c = list.get[i64](nums.*, 3) as i32,
+        .to_p = list.get[i64](nums.*, 4) as i32,
+        .path = p,
+        .length_nm = (steps as f64) * pitch_nm(),
+        .live = 0,
+    };
+    scene_restore_guide(s, g);
+    return true;
+}
+
+// Load zpa 1 (monolithic) or zpa 2 (chunk-streamed). Chunk sections are
+// applied incrementally as they are parsed.
+fn io_design_load_chunked(s: *Scene, path: []u8) bool {
+    let raw: []u8 = _zag_read_file(path);
+    if (raw.len <= 0) { return false; }
+    scene_clear(s);
+
+    let nums: list.ArrayList[i64] = list.make[i64](64);
+    let counts: list.ArrayList[i32] = list.make[i32](8);
+    let ki: i32 = 0;
+    while (ki < kind_count()) {
+        list.push[i32](&counts, 0);
+        ki = ki + 1;
+    }
+
+    let v2: bool = raw.len >= 6 && (raw[0] as i32) == 'z' && (raw[3] as i32) == '2';
+    let in_guides: bool = false;
+    let chunks_loaded: i32 = 0;
+
+    let pos: i32 = 0;
+    while (pos < raw.len) {
+        let eol: i32 = pos;
+        while (eol < raw.len && (raw[eol] as i32) != 10) { eol = eol + 1; }
+        let line: []u8 = raw[pos..eol];
+        pos = eol + 1;
+
+        if (line.len >= 4 && (line[0] as i32) == '@' && (line[1] as i32) == 'e') {
+            if (in_guides) { in_guides = false; }
+            chunks_loaded = chunks_loaded + 1;
+        }
+        if (v2 && line.len > 5 && (line[0] as i32) == 'm' && (line[1] as i32) == 'e') {
+            let stopm: i32 = 0;
+            parse_line_ints(line, 4, &nums, &stopm);
+            if (nums.len >= 2) {
+                s.*.next_comp = list.get[i64](nums, 0) as i32;
+                s.*.next_guide = list.get[i64](nums, 1) as i32;
+            }
+        }
+        if (v2 && line.len > 6 && (line[0] as i32) == 'g' && (line[1] as i32) == 'u') {
+            in_guides = true;
+        }
+        if (line.len > 2 && (line[0] as i32) == 'c' && (line[1] as i32) == 32) {
+            let _ok: bool = io_parse_comp_line(s, line, &nums, &counts);
+        }
+        if (line.len > 2 && (line[0] as i32) == 'g' && (line[1] as i32) == 32) {
+            let _ok2: bool = io_parse_guide_line(s, line, &nums);
+        }
+    }
+
+    let k2: i32 = 0;
+    while (k2 < kind_count()) {
+        list.set[i32](&s.*.made, k2, list.get[i32](counts, k2));
+        k2 = k2 + 1;
+    }
+    list.free[i64](&nums);
+    list.free[i32](&counts);
+    scene_mark_topo_full(s);
+    let _used_chunks: i32 = chunks_loaded;
+    return true;
+}

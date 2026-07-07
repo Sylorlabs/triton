@@ -1,0 +1,31 @@
+// x11_paint.zag — verify PutImage actually paints the window.
+@import("../src/workspace.zag")
+@import("../src/x11.zag")
+
+fn main() i32 {
+    let x: *X11 = x11_connect(1440, 900, "x11-paint-test");
+    if (!x.*.ok) {
+        _zag_eprintln("no display");
+        return 1;
+    }
+    let a: *App = app_new(1440, 900);
+    app_action_demo(a);
+    a.*.inp.w = x.*.win_w;
+    a.*.inp.h = x.*.win_h;
+    app_frame(a, 0.0);
+    _zag_print("shm_ok=");
+    if (x.*.shm_ok) { _zag_println("1"); } else { _zag_println("0"); }
+    _zag_print("px0=");
+    print_i64(a.*.f.px.data[0]);
+    x11_put_frame(x, a.*.f.px.data, a.*.f.w, a.*.f.h);
+    x11_pump(x);
+    _zag_println("painted — check window for 5s");
+    let i: i32 = 0;
+    while (i < 500) {
+        x11_pump(x);
+        x11_sleep_ms(10);
+        i = i + 1;
+    }
+    x11_close(x);
+    return 0;
+}
