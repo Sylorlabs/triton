@@ -77,15 +77,6 @@ fn sim_patch_comp(sim: *Sim, s: *Scene, comp_id: i32) void {
     sim_node_reset(n2);
 }
 
-fn sim_find_sguide(sim: *Sim, guide_id: i32) i32 {
-    let i: i32 = 0;
-    while (i < sim.*.sguides.len) {
-        if (sim.*.sguides.data[i].guide_id == guide_id) { return i; }
-        i = i + 1;
-    }
-    return 0 - 1;
-}
-
 fn sim_make_sguide(g: Guide) SGuide {
     let delay: i32 = guide_delay_symbols(g.path.len);
     let sg: SGuide = SGuide{
@@ -105,36 +96,50 @@ fn sim_make_sguide(g: Guide) SGuide {
     return sg;
 }
 
-// Rebuild sguides from the scene; preserve delay-line state when possible.
-fn sim_patch_guides(sim: *Sim, s: *Scene) void {
-    let gi0: i32 = 0;
-    while (gi0 < sim.*.sguides.len) {
-        list.free[i32](&sim.*.sguides.data[gi0].ring);
-        gi0 = gi0 + 1;
+fn sim_find_in(pool: list.ArrayList[SGuide], guide_id: i32) i32 {
+    let i: i32 = 0;
+    while (i < pool.len) {
+        if (pool.data[i].guide_id == guide_id) { return i; }
+        i = i + 1;
     }
-    sim.*.sguides.len = 0;
+    return 0 - 1;
+}
+
+// Rebuild sguides from the scene; preserve delay-line state when possible.
+// The old list is kept alive until the new one is built, so surviving guides
+// carry their in-flight trits across the patch.
+fn sim_patch_guides(sim: *Sim, s: *Scene) void {
+    let old: list.ArrayList[SGuide] = sim.*.sguides;
+    sim.*.sguides = list.make[SGuide](s.*.guides.len + 4);
 
     let gi: i32 = 0;
     while (gi < s.*.guides.len) {
         let g: Guide = s.*.guides.data[gi];
         let sg: SGuide = sim_make_sguide(g);
-        let prev: i32 = sim_find_sguide(sim, g.id);
+        let prev: i32 = sim_find_in(old, g.id);
         if (prev >= 0) {
-            let old: SGuide = sim.*.sguides.data[prev];
-            if (old.delay == sg.delay) {
-                sg.head = old.head;
-                sg.arrived = old.arrived;
+            let og: SGuide = old.data[prev];
+            if (og.delay == sg.delay) {
+                sg.head = og.head;
+                sg.arrived = og.arrived;
                 let ri: i32 = 0;
                 while (ri < sg.delay) {
-                    list.set[i32](&sg.ring, ri, list.get[i32](old.ring, ri));
+                    list.set[i32](&sg.ring, ri, list.get[i32](og.ring, ri));
                     ri = ri + 1;
                 }
+                s.*.guides.data[gi].live = og.arrived;
             }
         }
         list.push[SGuide](&sim.*.sguides, sg);
-        s.*.guides.data[gi].live = 0;
         gi = gi + 1;
     }
+
+    let oi: i32 = 0;
+    while (oi < old.len) {
+        list.free[i32](&old.data[oi].ring);
+        oi = oi + 1;
+    }
+    list.free[SGuide](&old);
 }
 
 fn sim_should_full_rebuild(sim: *Sim, s: *Scene) bool {

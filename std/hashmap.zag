@@ -25,6 +25,7 @@ struct HashMap[K,V] {
     entries: *HEntry[K,V],
     cap:     i32,
     count:   i32,
+    tombs:   i32,   // tombstoned slots still poisoning probe chains
     hash_fn: fn(K) i32,
     eq_fn:   fn(K,K) bool,
 }
@@ -78,16 +79,20 @@ fn hm_alloc[K,V](n: i32) *HEntry[K,V] {
 fn make[K,V](cap: i32, hash_fn: fn(K) i32, eq_fn: fn(K,K) bool) HashMap[K,V] {
     let c: i32 = cap;
     if (c < 8) { c = 8; }
-    return HashMap[K,V]{ .entries = hm_alloc[K,V](c), .cap = c, .count = 0, .hash_fn = hash_fn, .eq_fn = eq_fn };
+    return HashMap[K,V]{ .entries = hm_alloc[K,V](c), .cap = c, .count = 0, .tombs = 0, .hash_fn = hash_fn, .eq_fn = eq_fn };
 }
 
 fn hm_grow[K,V](m: *HashMap[K,V]) void {
     let old_cap: i32 = m.*.cap;
     let old_e: *HEntry[K,V] = m.*.entries;
+    // If growth was tombstone-driven (few live entries), rehash at the same
+    // capacity to sweep the tombstones instead of ballooning.
     let new_cap: i32 = old_cap * 2;
+    if (m.*.count * 10 < old_cap * 4) { new_cap = old_cap; }
     m.*.entries = hm_alloc[K,V](new_cap);
     m.*.cap = new_cap;
     m.*.count = 0;
+    m.*.tombs = 0;
     let i: i32 = 0;
     while (i < old_cap) {
         if (old_e[i].used == 1) {
@@ -98,19 +103,32 @@ fn hm_grow[K,V](m: *HashMap[K,V]) void {
     _zag_free(old_e as *i8);
 }
 
+// Probe chains must skip tombstones (used == 2): a lookup only stops at a
+// truly-never-used slot (used == 0), otherwise keys inserted before an
+// unrelated delete become unreachable. `tombs` tracks dead slots so the grow
+// trigger accounts for them (a churned map rehashes instead of clogging).
 fn put[K,V](m: *HashMap[K,V], key: K, val: V) void {
-    if ((m.*.count + 1) * 10 >= m.*.cap * 7) {
+    if ((m.*.count + m.*.tombs + 1) * 10 >= m.*.cap * 7) {
         hm_grow[K,V](m);
     }
     let cap: i32 = m.*.cap;
     let idx: i32 = m.*.hash_fn(key) % cap;
-    while (m.*.entries[idx].used == 1) {
-        if (m.*.eq_fn(m.*.entries[idx].key, key)) {
-            m.*.entries[idx].val = val;
-            return;
+    let free_slot: i32 = 0 - 1;   // first tombstone seen: reuse it
+    while (m.*.entries[idx].used != 0) {
+        if (m.*.entries[idx].used == 1) {
+            if (m.*.eq_fn(m.*.entries[idx].key, key)) {
+                m.*.entries[idx].val = val;
+                return;
+            }
+        } else if (free_slot < 0) {
+            free_slot = idx;
         }
         idx = idx + 1;
         if (idx >= cap) { idx = 0; }
+    }
+    if (free_slot >= 0) {
+        idx = free_slot;
+        m.*.tombs = m.*.tombs - 1;
     }
     m.*.entries[idx].key = key;
     m.*.entries[idx].val = val;
@@ -121,8 +139,8 @@ fn put[K,V](m: *HashMap[K,V], key: K, val: V) void {
 fn get[K,V](m: HashMap[K,V], key: K) ?V {
     let cap: i32 = m.cap;
     let idx: i32 = m.hash_fn(key) % cap;
-    while (m.entries[idx].used == 1) {
-        if (m.eq_fn(m.entries[idx].key, key)) {
+    while (m.entries[idx].used != 0) {
+        if (m.entries[idx].used == 1 && m.eq_fn(m.entries[idx].key, key)) {
             return m.entries[idx].val;
         }
         idx = idx + 1;
@@ -134,8 +152,8 @@ fn get[K,V](m: HashMap[K,V], key: K) ?V {
 fn has[K,V](m: HashMap[K,V], key: K) bool {
     let cap: i32 = m.cap;
     let idx: i32 = m.hash_fn(key) % cap;
-    while (m.entries[idx].used == 1) {
-        if (m.eq_fn(m.entries[idx].key, key)) {
+    while (m.entries[idx].used != 0) {
+        if (m.entries[idx].used == 1 && m.eq_fn(m.entries[idx].key, key)) {
             return true;
         }
         idx = idx + 1;
@@ -147,10 +165,11 @@ fn has[K,V](m: HashMap[K,V], key: K) bool {
 fn del[K,V](m: *HashMap[K,V], key: K) bool {
     let cap: i32 = m.*.cap;
     let idx: i32 = m.*.hash_fn(key) % cap;
-    while (m.*.entries[idx].used == 1) {
-        if (m.*.eq_fn(m.*.entries[idx].key, key)) {
+    while (m.*.entries[idx].used != 0) {
+        if (m.*.entries[idx].used == 1 && m.*.eq_fn(m.*.entries[idx].key, key)) {
             m.*.entries[idx].used = 2;   // tombstone
             m.*.count = m.*.count - 1;
+            m.*.tombs = m.*.tombs + 1;
             return true;
         }
         idx = idx + 1;
@@ -167,6 +186,7 @@ fn free[K,V](m: *HashMap[K,V]) void {
     _zag_free(m.*.entries as *i8);
     m.*.cap = 0;
     m.*.count = 0;
+    m.*.tombs = 0;
 }
 
 // ── IntMap[V]: i32-keyed convenience wrapper ─────────────────────────────────

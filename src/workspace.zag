@@ -4,6 +4,7 @@
 
 @import("../std/list.zag") as list
 @import("app.zag")
+@import("sim_region.zag")
 @import("demo.zag")
 
 fn fmt_i(v: i64) []u8 {
@@ -996,6 +997,9 @@ fn app_frame(a: *App, dt: f64) void {
     app_keys(a);
     if (a.*.inp.capture != 4) { app_viewport_input(a); }
 
+    // Incremental sim patch: small edits keep symbol time and in-flight state;
+    // clear/load or large dirty sets fall back to a full recompile inside.
+    if (a.*.scene.*.topo_dirty) { sim_recompile_region(a.*.sim, a.*.scene); }
     let _stepped: i32 = sim_update(a.*.sim, a.*.scene, dt);
     fb_resize(&a.*.f, a.*.inp.w, a.*.inp.h);
 

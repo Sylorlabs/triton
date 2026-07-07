@@ -2,9 +2,11 @@
 // placement DRC, removal cascades, A* routing, ternary interference sim.
 
 @import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
 @import("../src/scene.zag")
 @import("../src/routing.zag")
 @import("../src/sim.zag")
+@import("../src/sim_region.zag")
 @import("../src/editops.zag")
 
 fn check(name_: []u8, ok: bool, fails: *i32) void {
@@ -237,6 +239,110 @@ fn main() i32 {
     check("journal: loaded undo works", journal_undo(&jj2, s) && s.*.comps.len == comps_before - 1, &fails);
     journal_clear(&jj);
     journal_clear(&jj2);
+
+    // ── incremental sim patching ──
+    let psim: *Sim = sim_new();
+    sim_recompile_region(psim, s);          // initial full build
+    let pn: i32 = 0;
+    while (pn < 20) { sim_step(psim, s); pn = pn + 1; }
+    check("patch: sim advanced", psim.*.symbol == 20, &fails);
+    let pplate: i32 = scene_place(s, Kind.Plate, vox(220, 0, 0), 0);
+    let pch: i32 = scene_place(s, Kind.Chamber, vox(221, 1, 1), 0);
+    check("patch: parts placed", pplate > 0 && pch > 0, &fails);
+    sim_recompile_region(psim, s);
+    check("patch: symbol time preserved across small edit", psim.*.symbol == 20, &fails);
+    check("patch: new node present", sim_node_index(psim, pch) >= 0, &fails);
+    check("patch: topo flags cleared", !s.*.topo_dirty, &fails);
+    scene_remove(s, pch);
+    sim_recompile_region(psim, s);
+    check("patch: removed node dropped", sim_node_index(psim, pch) < 0, &fails);
+    check("patch: time still preserved", psim.*.symbol == 20, &fails);
+    scene_remove(s, pplate);
+    sim_recompile_region(psim, s);
+
+    // ── hashmap tombstone churn ──
+    // put/del/get cycles: probe chains must survive tombstones.
+    let tm: hm.Int64Map[i32] = hm.int64_make[i32](8);
+    let ti: i64 = 0;
+    while (ti < 500) {
+        hm.int64_put[i32](&tm, ti, (ti as i32) * 3);
+        ti = ti + 1;
+    }
+    let td: i64 = 0;
+    while (td < 500) {                       // delete every even key
+        let _g: bool = hm.del[i64, i32](&tm.inner, td);
+        td = td + 2;
+    }
+    let tomb_ok: bool = true;
+    let tq: i64 = 1;
+    while (tq < 500) {                       // every odd key must survive
+        let got: i32 = hm.int64_get[i32](tm, tq) orelse (0 - 1);
+        if (got != (tq as i32) * 3) { tomb_ok = false; }
+        tq = tq + 2;
+    }
+    let tq2: i64 = 0;
+    while (tq2 < 500) {                      // every even key must be gone
+        if (hm.int64_has[i32](tm, tq2)) { tomb_ok = false; }
+        tq2 = tq2 + 2;
+    }
+    check("hashmap: lookups survive tombstones", tomb_ok, &fails);
+    let tr: i64 = 0;
+    while (tr < 500) {                       // reinsert into tombstoned slots
+        hm.int64_put[i32](&tm, tr, (tr as i32) * 7);
+        tr = tr + 2;
+    }
+    let re_ok: bool = true;
+    let rq: i64 = 0;
+    while (rq < 500) {
+        let want: i32 = (rq as i32) * 3;
+        if (rq % 2 == 0) { want = (rq as i32) * 7; }
+        let got2: i32 = hm.int64_get[i32](tm, rq) orelse (0 - 1);
+        if (got2 != want) { re_ok = false; }
+        rq = rq + 1;
+    }
+    check("hashmap: reinsert after delete, no duplicates", re_ok, &fails);
+    hm.int64_free[i32](&tm);
+
+    // ── occupancy churn: place/remove cycles must not corrupt the lattice ──
+    let cp: i32 = scene_place(s, Kind.Plate, vox(200, 0, 0), 0);
+    check("churn: plate placed", cp > 0, &fails);
+    let round: i32 = 0;
+    let churn_ok: bool = true;
+    while (round < 30) {
+        let ids2: list.ArrayList[i32] = list.make[i32](16);
+        let px: i32 = 0;
+        while (px < 3) {   // chamber fp is 2x2x2: stride 2, stay on the 8x8 plate
+            let cid: i32 = scene_place(s, Kind.Chamber, vox(200 + px * 2, 1, (round % 3) * 2), 0);
+            if (cid < 0) { churn_ok = false; }
+            list.push[i32](&ids2, cid);
+            px = px + 1;
+        }
+        // every placed comp must own its origin cell
+        let vi: i32 = 0;
+        while (vi < ids2.len) {
+            let cid2: i32 = list.get[i32](ids2, vi);
+            let ci3: i32 = scene_comp_index(s, cid2);
+            if (ci3 < 0) { churn_ok = false; }
+            else if (scene_cell_owner(s, s.*.comps.data[ci3].origin) != cid2) { churn_ok = false; }
+            vi = vi + 1;
+        }
+        let di2: i32 = 0;
+        while (di2 < ids2.len) {
+            scene_remove(s, list.get[i32](ids2, di2));
+            di2 = di2 + 1;
+        }
+        // all churn cells free again
+        let fx: i32 = 0;
+        while (fx < 6) {
+            if (scene_cell_owner(s, vox(200 + fx, 1, (round % 3) * 2)) >= 0) { churn_ok = false; }
+            fx = fx + 1;
+        }
+        list.free[i32](&ids2);
+        round = round + 1;
+    }
+    check("churn: occupancy exact through 30 place/remove rounds", churn_ok, &fails);
+    check("churn: DRC accepts freed cells",
+        scene_can_place(s, Kind.Chamber, vox(200, 1, 0), 0) == 0, &fails);
 
     if (fails == 0) { _zag_println("ENGINE: ALL PASS"); return 0; }
     _zag_println("ENGINE: FAILURES");
