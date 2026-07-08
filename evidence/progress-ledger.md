@@ -21,12 +21,16 @@ is the only GPU and drives the display.
 | E.native-automation | pass | native `--agent`, `--mcp`, `zagctl`; legacy Python client removed | Supported automation path is compiled Zag | Add capability enforcement |
 | E.flash-fir-import | pass | `flash import`; `src/flash_ir.zag`; `./verify.sh safe` | Flash FIR v1 maps to production components/routes without executing host code | Add UI import dialog and trace panel |
 | C.massive-flash-pcu | pass | `../flash/examples/photonic_massive.flash`; `flash-photonic` gate | 64 ops became 384 components including 64 memory tiles and 192 routed guides; zero detector mismatches | Extend all-vector oracle coverage |
-| D.flash-ternary-ops | pass | chamber lattice ops 2/3/5/7; constant-trit emitters | Flash neg/add/mul/nand semantics verified after physical pipeline latency | Add exhaustive truth-table property test |
+| D.flash-ternary-ops | pass | chamber lattice ops 2/3/5/7; constant-trit emitters | Flash neg/add/mul/nand semantics and exhaustive truth tables pass | Add larger composed-network oracle |
+| D.simulation-modes | pass | `SimMode.Functional`, `SimMode.Physical`; `simulation-properties` | Functional behavior is independent of missing physical data; physical mode rejects it | Add deterministic trace capture |
+| D.property-oracle | pass | `probe/simulation_property_test.zag`; `simulation-properties` | Exhaustive Flash truth tables, explicit invalid states, delay linearity/rate monotonicity all pass | Add graph differential/metamorphic suites |
+| D.deterministic-trace | pass | `trace`; `examples/flash_photonic_massive.trace.txt`; `deterministic-trace` | Two fresh 32-symbol massive-PCU traces match each other and the golden bytes | Add trace viewer and breakpoints |
 | G.flash-roundtrip | pass | `examples/flash_photonic_massive.zpa`, save/reopen verify | Canonical project matches a fresh public-interface reconstruction byte-for-byte | Keep comparison in the safe gate |
 | G.deterministic-exports | pass | `examples/flash_photonic_massive.{bom,netlist,models,report}.txt`; `flash-photonic` | Regenerated project and all four exports compare byte-for-byte with maintained artifacts | Add render pixel-diff gate |
 | G.atomic-save | pass | `atomic_write_file`; engine failure injection | temp write, file fsync, close, rename; failed rename retained destination and removed temp | Add parent-directory fsync and crash-stage matrix |
 | G.corruption | pass | project v2 checksum; `corrupt project checksum rejected` | Modified project byte rejected before scene mutation | Add recovery journal UX |
 | E.capability-default | pass | `src/capability.zag`; `agent-capability-denial` | default read/inspect/simulate; unauthorized placement leaves project hash unchanged | Add scoped/expiring grants |
+| E.path-confinement | pass | `TRITON_PROJECT_ROOT`; `agent-path-confinement` | Outside-root and lexical parent traversal writes rejected with stable error; no file created | Add symlink-safe descriptor-relative access |
 | E.audit-log | partial | append-only request/denial records with actor and required capability | command results/affected IDs/undo tokens not yet recorded | Complete mutation result records |
 | F.x11-live-baseline | pass | `./verify.sh safe`; `--x11-selftest` on `DISPLAY=:0` | Motion, modifier, key, button, WM_DELETE, and PutImage round trip passed | Add resize/focus/reopen coverage |
 | F.x11-interleaving | pass | `X11.synth_seen`; live selftest | Synthetic proof no longer flakes when real pointer events interleave | Add resize/focus synthetic cases |

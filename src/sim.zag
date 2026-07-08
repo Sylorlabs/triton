@@ -142,6 +142,8 @@ struct SGuide {
     arrived: i32,                // trit delivered to the sink this symbol
 }
 
+enum SimMode { Functional, Physical }
+
 struct Sim {
     nodes: list.ArrayList[SNode],
     sguides: list.ArrayList[SGuide],
@@ -152,6 +154,7 @@ struct Sim {
     speed: f64,                  // symbols per second of wall time
     accum: f64,
     model_ok: bool,
+    mode: SimMode,
 }
 
 fn sim_new() *Sim {
@@ -165,6 +168,7 @@ fn sim_new() *Sim {
         .speed = 12.0,
         .accum = 0.0,
         .model_ok = false,
+        .mode = SimMode.Physical,
     });
 }
 
@@ -206,7 +210,8 @@ fn sim_recompile(sim: *Sim, s: *Scene) void {
     sim.*.nidx = hm.int_make[i32](64);
     sim.*.symbol = 0;
     sim.*.accum = 0.0;
-    sim.*.model_ok = model_validate(s.*.model) && model_complete(s.*.model);
+    sim.*.model_ok = sim.*.mode == SimMode.Functional ||
+        (model_validate(s.*.model) && model_complete(s.*.model));
 
     let ci: i32 = 0;
     while (ci < s.*.comps.len) {
@@ -254,8 +259,12 @@ fn sim_recompile(sim: *Sim, s: *Scene) void {
 // Build a delay-line from a scene guide: delay quantized against the derived
 // clock, carrier phase from routed length and source wavelength.
 fn sim_build_sguide(sim: *Sim, s: *Scene, g: Guide) SGuide {
-    let delay: i32 = guide_delay_symbols_for_model(s, sim.*.clock_ghz, g.length_nm);
-    let phi: f64 = guide_phase_for(s, g.length_nm, sim_guide_wl(s, g.from_c));
+    let delay: i32 = 1;
+    let phi: f64 = 0.0;
+    if (sim.*.mode == SimMode.Physical) {
+        delay = guide_delay_symbols_for_model(s, sim.*.clock_ghz, g.length_nm);
+        phi = guide_phase_for(s, g.length_nm, sim_guide_wl(s, g.from_c));
+    }
     let sg: SGuide = SGuide{
         .guide_id = g.id,
         .from_c = g.from_c,

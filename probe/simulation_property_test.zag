@@ -1,0 +1,61 @@
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("../src/flash_ir.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn oracle(op: i32, a: i32, b: i32) i32 {
+    if (op == 2) { return 0 - a; }
+    if (op == 5) { return a * b; }
+    if (op == 7) { let v: i32 = a; if (b < v) { v = b; } return 0 - v; }
+    let raw: i32 = a + b;
+    if (raw > 1) { raw = raw - 3; }
+    if (raw < 0 - 1) { raw = raw + 3; }
+    return raw;
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    check("unknown glyph", _zag_strcmp(trit_glyph(signal_unknown()), "?") == 1, &failures);
+    check("high-Z glyph", _zag_strcmp(trit_glyph(signal_high_z()), "Z") == 1, &failures);
+    check("error propagates", trit_sat_add(signal_unknown(), 1) == signal_error(), &failures);
+
+    let ops: list.ArrayList[i32] = list.make[i32](4);
+    list.push[i32](&ops, 2); list.push[i32](&ops, 3); list.push[i32](&ops, 5); list.push[i32](&ops, 7);
+    let truth_ok: bool = true;
+    let oi: i32 = 0;
+    while (oi < ops.len) {
+        let a: i32 = 0 - 1;
+        while (a <= 1) {
+            let b: i32 = 0 - 1;
+            while (b <= 1) {
+                if (flash_logic_expected(ops.data[oi], a, b) != oracle(ops.data[oi], a, b)) { truth_ok = false; }
+                b = b + 1;
+            }
+            a = a + 1;
+        }
+        oi = oi + 1;
+    }
+    check("exhaustive Flash trit truth tables", truth_ok, &failures);
+
+    let s: *Scene = scene_new();
+    let d1: f64 = guide_delay_fs_for(s, 1000.0);
+    let d2: f64 = guide_delay_fs_for(s, 2000.0);
+    check("propagation delay linear in length", d2 > d1 && d2 == d1 * 2.0, &failures);
+    let slow: i32 = guide_delay_symbols_for_model(s, 50.0, 10000000.0);
+    let fast: i32 = guide_delay_symbols_for_model(s, 100.0, 10000000.0);
+    check("higher symbol rate requires at least as many delay symbols", fast >= slow, &failures);
+
+    let sim: *Sim = sim_new();
+    s.*.model.group_index.known = false;
+    sim.*.mode = SimMode.Physical; sim_recompile(sim, s);
+    check("physical mode rejects incomplete model", !sim.*.model_ok, &failures);
+    sim.*.mode = SimMode.Functional; sim_recompile(sim, s);
+    check("functional mode is independent of physical completeness", sim.*.model_ok, &failures);
+
+    if (failures == 0) { _zag_println("SIMULATION PROPERTIES: ALL PASS"); return 0; }
+    _zag_println("SIMULATION PROPERTIES: FAILURES"); return 1;
+}

@@ -2,7 +2,13 @@
 // A trit is carried as optical phase: +1 => 0 deg carrier, -1 => 180 deg
 // carrier, 0 => dark (no carrier). Interference of counter-phased carriers
 // cancels; in-phase carriers reinforce and saturate at unit amplitude.
-// Trits are plain i32 values in {-1, 0, +1}.
+// Signal encoding: -1/0/+1 are valid trits; -2 unknown; 2 high impedance;
+// 3 error/conflict. Non-trit states propagate through symbolic operations.
+
+fn signal_unknown() i32 { return 0 - 2; }
+fn signal_high_z() i32 { return 2; }
+fn signal_error() i32 { return 3; }
+fn signal_is_trit(t: i32) bool { return t >= 0 - 1 && t <= 1; }
 
 // Saturating balanced-ternary sum: the sign of the summed field.
 fn trit_from_sum(sum: i32) i32 {
@@ -12,6 +18,7 @@ fn trit_from_sum(sum: i32) i32 {
 }
 
 fn trit_sat_add(a: i32, b: i32) i32 {
+    if (!signal_is_trit(a) || !signal_is_trit(b)) { return signal_error(); }
     return trit_from_sum(a + b);
 }
 
@@ -25,6 +32,7 @@ fn trit_from_field(re: f64) i32 {
 }
 
 fn trit_negate(a: i32) i32 {
+    if (!signal_is_trit(a)) { return signal_error(); }
     return 0 - a;
 }
 
@@ -40,6 +48,9 @@ fn trit_amp(t: i32) f64 {
 }
 
 fn trit_glyph(t: i32) []u8 {
+    if (t == signal_unknown()) { return "?"; }
+    if (t == signal_high_z()) { return "Z"; }
+    if (t == signal_error()) { return "!"; }
     if (t > 0) { return "+"; }
     if (t < 0) { return "-"; }
     return "0";
@@ -52,6 +63,7 @@ fn trit_glyph(t: i32) []u8 {
 // Colors are 0x00RRGGBB packed via fb.rgb (values here are precomputed).
 
 fn trit_color(t: i32) i64 {
+    if (!signal_is_trit(t)) { return 16753920; } // amber invalid/unknown
     if (t > 0) { return 58879; }            // cyan    (0,229,255)
     if (t < 0) { return 14423100; }         // crimson (220,20,60)
     return 1446171;                          // obsidian (22,17,27)
@@ -59,6 +71,7 @@ fn trit_color(t: i32) i64 {
 
 // Brighter rim accent for outlines and waveguide edges.
 fn trit_rim(t: i32) i64 {
+    if (!signal_is_trit(t)) { return 16769280; }
     if (t > 0) { return 12058623; }         // bright cyan   (184,240,255)
     if (t < 0) { return 16724736; }         // hot crimson   (255,64,96)
     return 5263440;                          // slate rim     (80,72,80)

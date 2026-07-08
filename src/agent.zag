@@ -62,6 +62,44 @@ fn tok_eq(line: []u8, t: Tok, lit: []u8) bool {
     return true;
 }
 
+// Agent file access is opt-in confined by TRITON_PROJECT_ROOT.  Paths must be
+// absolute, below that root, and lexically free of parent-directory segments.
+// The OS remains the final authority; this guard prevents obvious traversal
+// before any read or write is attempted.
+fn path_has_parent_segment(path: []u8) bool {
+    let i: i32 = 0;
+    while (i + 1 < path.len) {
+        if ((path[i] as i32) == 46 && (path[i + 1] as i32) == 46) {
+            let left: bool = i == 0 || (path[i - 1] as i32) == 47;
+            let right: bool = i + 2 == path.len || (path[i + 2] as i32) == 47;
+            if (left && right) { return true; }
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn path_under_root(path: []u8) bool {
+    let root: []u8 = _zag_getenv("TRITON_PROJECT_ROOT");
+    if (root.len == 0) { return true; }
+    if (path.len == 0 || (path[0] as i32) != 47 || path_has_parent_segment(path)) { return false; }
+    let n: i32 = root.len;
+    while (n > 1 && (root[n - 1] as i32) == 47) { n = n - 1; }
+    if (path.len < n) { return false; }
+    let i: i32 = 0;
+    while (i < n) {
+        if ((path[i] as i32) != (root[i] as i32)) { return false; }
+        i = i + 1;
+    }
+    return path.len == n || (path[n] as i32) == 47;
+}
+
+fn agent_path_allowed(path: []u8) bool {
+    if (path_under_root(path)) { return true; }
+    agent_err("E_PATH_OUTSIDE_ROOT path must remain inside TRITON_PROJECT_ROOT");
+    return false;
+}
+
 fn parse_kind_name(s: []u8) i32 {
     if (_zag_strcmp(s, "plate") == 1) { return 0; }
     if (_zag_strcmp(s, "gesn") == 1) { return 0; }
@@ -145,10 +183,11 @@ fn agent_help() void {
     _zag_println("delete <id> | route <fc> <fp> <tc> <tp>");
     _zag_println("can_place <kind> <x> <y> <z> [rot] | list | get <id> | select <id>");
     _zag_println("undo | redo | view | pick | open [file.zpa] | save [file.zpa]  (default: live session)");
-    _zag_println("sim step [n] | sim reset | sim state | render <out.bmp>");
+    _zag_println("sim step [n] | sim reset | sim state | sim mode functional|physical | render <out.bmp>");
     _zag_println("status | coords | power | perf | kinds");
     _zag_println("flash import <program.fir> | flash verify");
     _zag_println("export <prefix>  (writes BOM, netlist, models, report)");
+    _zag_println("trace <out.trace> <steps>  (deterministic engine trace)");
     _zag_println("test engine | test smoke | build");
     _zag_println("kinds: plate chamber soh emitter detector");
     agent_dot();
@@ -543,6 +582,7 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
     if (tok_eq(line, verb, "sim")) { required = cap_simulate(); }
     if (tok_eq(line, verb, "render")) { required = cap_export(); }
     if (tok_eq(line, verb, "export")) { required = cap_export(); }
+    if (tok_eq(line, verb, "trace")) { required = cap_export(); }
     if (tok_eq(line, verb, "save")) { required = cap_save(); }
     if (tok_eq(line, verb, "test") || tok_eq(line, verb, "build")) { required = cap_execute(); }
     if (tok_eq(line, verb, "new") || tok_eq(line, verb, "demo") ||
@@ -719,6 +759,7 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
     if (tok_eq(line, verb, "save")) {
         let path: []u8 = session_zpa_path();
         if (toks.*.len >= 2) { path = tok_slice(line, list.get[Tok](toks, 1)); }
+        if (!agent_path_allowed(path)) { return; }
         if (design_save(a.*.scene, path)) {
             a.*.file_ = _zag_strdup(path);
             a.*.dirty = false;
@@ -730,6 +771,7 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
     if (tok_eq(line, verb, "open")) {
         let path: []u8 = session_zpa_path();
         if (toks.*.len >= 2) { path = tok_slice(line, list.get[Tok](toks, 1)); }
+        if (!agent_path_allowed(path)) { return; }
         if (design_load(a.*.scene, path)) {
             if (_zag_strcmp(path, session_zpa_path()) == 1) {
                 session_sync_journal(a);
@@ -760,14 +802,28 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
     }
     if (tok_eq(line, verb, "render")) {
         if (toks.*.len < 2) { agent_err("usage: render <out.bmp>"); return; }
-        agent_render(a, tok_slice(line, list.get[Tok](toks, 1)));
+        let path: []u8 = tok_slice(line, list.get[Tok](toks, 1));
+        if (!agent_path_allowed(path)) { return; }
+        agent_render(a, path);
         return;
     }
     if (tok_eq(line, verb, "export")) {
         if (toks.*.len < 2) { agent_err("usage: export <prefix>"); return; }
-        if (export_all(a.*.scene, a.*.sim, tok_slice(line, list.get[Tok](toks, 1)))) {
+        let path: []u8 = tok_slice(line, list.get[Tok](toks, 1));
+        if (!agent_path_allowed(path)) { return; }
+        if (export_all(a.*.scene, a.*.sim, path)) {
             agent_ok1("exported BOM netlist models report");
         } else { agent_err("E_EXPORT_FAILED artifact write failed"); }
+        return;
+    }
+    if (tok_eq(line, verb, "trace")) {
+        if (toks.*.len < 3) { agent_err("usage: trace <out.trace> <steps>"); return; }
+        let path: []u8 = tok_slice(line, list.get[Tok](toks, 1));
+        if (!agent_path_allowed(path)) { return; }
+        let steps: i32 = tok_i64(line, list.get[Tok](toks, 2)) as i32;
+        if (steps < 1 || steps > 100000) { agent_err("E_TRACE_LIMIT steps must be 1..100000"); return; }
+        if (export_trace(a.*.scene, a.*.sim, path, steps)) { agent_ok1("trace exported"); }
+        else { agent_err("E_TRACE_FAILED trace write failed"); }
         return;
     }
     if (tok_eq(line, verb, "sim")) {
@@ -796,6 +852,15 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
             agent_ok1(msg);
             return;
         }
+        if (tok_eq(line, sub, "mode")) {
+            if (toks.*.len < 3) { agent_err("usage: sim mode functional|physical"); return; }
+            let mode: Tok = list.get[Tok](toks, 2);
+            if (tok_eq(line, mode, "functional")) { a.*.sim.*.mode = SimMode.Functional; }
+            else if (tok_eq(line, mode, "physical")) { a.*.sim.*.mode = SimMode.Physical; }
+            else { agent_err("E_BAD_MODE expected functional or physical"); return; }
+            sim_recompile(a.*.sim, a.*.scene);
+            agent_ok1("simulation mode changed"); return;
+        }
         agent_err("sim: use step, reset, or state");
         return;
     }
@@ -804,7 +869,9 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
         let sub: Tok = list.get[Tok](toks, 1);
         if (tok_eq(line, sub, "import")) {
             if (toks.*.len < 3) { agent_err("usage: flash import <program.fir>"); return; }
-            let ir: FlashIr = flash_ir_load(tok_slice(line, list.get[Tok](toks, 2)));
+            let path: []u8 = tok_slice(line, list.get[Tok](toks, 2));
+            if (!agent_path_allowed(path)) { return; }
+            let ir: FlashIr = flash_ir_load(path);
             if (!ir.valid) { agent_err("invalid, empty, or oversized Flash FIR v1"); return; }
             app_new_design(a);
             a.*.file_ = _zag_strdup(session_zpa_path());

@@ -631,6 +631,10 @@ fn draw_debugger(a: *App) void {
     let ps: f64 = (a.*.sim.*.symbol as f64) * sim_period_ps(a.*.sim);
     let cx: i32 = x + 332;
     let tcol: i64 = th_text_dim();
+    let mode_label: []u8 = "Functional  ";
+    if (a.*.sim.*.mode == SimMode.Physical) { mode_label = "Physical  "; }
+    draw_text(f, cx, y + 5, mode_label, tcol);
+    cx = cx + text_w(mode_label);
     draw_text(f, cx, y + 5, "symbol ", tcol);
     cx = cx + text_w("symbol ");
     cx = cx + draw_int(f, cx, y + 5, a.*.sim.*.symbol, tcol);
@@ -639,8 +643,10 @@ fn draw_debugger(a: *App) void {
     cx = cx + draw_int(f, cx, y + 5, ps as i64, tcol);
     draw_text(f, cx, y + 5, " ps   clock ", tcol);
     cx = cx + text_w(" ps   clock ");
-    if (!model_complete(a.*.scene.*.model)) {
+    if (a.*.sim.*.mode == SimMode.Physical && !model_complete(a.*.scene.*.model)) {
         draw_text(f, cx, y + 5, "Unknown (model incomplete)", th_warning());
+    } else if (a.*.sim.*.mode == SimMode.Functional) {
+        draw_text(f, cx, y + 5, "N/A (symbolic)", tcol);
     } else if (a.*.sim.*.clock_ghz > 0.0) {
         cx = cx + draw_int(f, cx, y + 5, a.*.sim.*.clock_ghz as i64, tcol);
         let evidence: []u8 = evidence_class_name(a.*.scene.*.model.emitter_rate_ghz.confidence);
