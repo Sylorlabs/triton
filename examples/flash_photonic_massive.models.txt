@@ -1,0 +1,11 @@
+# Triton device model manifest v1
+schema = 1 
+id = triton.reference.illustrative.v1
+pitch_nm known=1 value_x1000000=250000000  units=nm class=Illustrative source=Triton illustrative reference fixture version=1 date=2026-07-07 method=illustrative CAD lattice uncertainty_x1000000=0 
+group_index known=1 value_x1000000=2100000  units=1 class=Illustrative source=Triton illustrative reference fixture version=1 date=2026-07-07 method=illustrative waveguide model uncertainty_x1000000=0 
+emitter_rate_ghz known=1 value_x1000000=110000000  units=GHz class=Illustrative source=Triton illustrative reference fixture version=1 date=2026-07-07 method=illustrative EO response uncertainty_x1000000=0 
+chamber_rate_ghz known=1 value_x1000000=180000000  units=GHz class=Illustrative source=Triton illustrative reference fixture version=1 date=2026-07-07 method=illustrative cavity response uncertainty_x1000000=0 
+detector_rate_ghz known=1 value_x1000000=140000000  units=GHz class=Illustrative source=Triton illustrative reference fixture version=1 date=2026-07-07 method=illustrative detector response uncertainty_x1000000=0 
+emitter_wavelength_min_nm known=1 value_x1000000=1530000000  units=nm class=Illustrative source=Triton illustrative reference fixture version=1 date=2026-07-07 method=illustrative C-band channel plan uncertainty_x1000000=0 
+emitter_wavelength_step_nm known=1 value_x1000000=800000  units=nm class=Illustrative source=Triton illustrative reference fixture version=1 date=2026-07-07 method=illustrative WDM spacing uncertainty_x1000000=0 
+chamber_resonance_nm known=1 value_x1000000=1550000000  units=nm class=Illustrative source=Triton illustrative reference fixture version=1 date=2026-07-07 method=illustrative cavity resonance uncertainty_x1000000=0 

@@ -1,0 +1,86 @@
+// export.zag — deterministic human/machine-readable project artifacts.
+
+@import("../std/list.zag") as list
+@import("scene.zag")
+@import("sim.zag")
+@import("editops.zag")
+
+fn ex_text(out: *list.ArrayList[u8], text: []u8) void { ser_text(out, text); }
+fn ex_i(out: *list.ArrayList[u8], v: i64) void { ser_int(out, v); }
+
+fn export_bom(s: *Scene, path: []u8) bool {
+    let out: list.ArrayList[u8] = list.make[u8](256);
+    ex_text(&out, "# Triton deterministic bill of materials\n");
+    let k: i32 = 0;
+    while (k < kind_count()) {
+        let count: i32 = 0;
+        let i: i32 = 0;
+        while (i < s.*.comps.len) { if (kind_index(s.*.comps.data[i].kind) == k) { count = count + 1; } i = i + 1; }
+        ex_text(&out, kind_slug(kind_at(k))); ex_text(&out, " = "); ex_i(&out, count as i64); ex_text(&out, "\n");
+        k = k + 1;
+    }
+    ex_text(&out, "waveguides = "); ex_i(&out, s.*.guides.len as i64); ex_text(&out, "\n");
+    let ok: bool = atomic_write_file(path, out.data[0..out.len]); list.free[u8](&out); return ok;
+}
+
+fn export_netlist(s: *Scene, path: []u8) bool {
+    let out: list.ArrayList[u8] = list.make[u8](1024);
+    ex_text(&out, "# Triton netlist v1\n");
+    let i: i32 = 0;
+    while (i < s.*.comps.len) {
+        let c: Comp = s.*.comps.data[i];
+        ex_text(&out, "component "); ex_i(&out, c.id as i64); ex_text(&out, " "); ex_text(&out, kind_slug(c.kind));
+        ex_text(&out, " xyz "); ex_i(&out, c.origin.x as i64); ex_i(&out, c.origin.y as i64); ex_i(&out, c.origin.z as i64);
+        ex_text(&out, "logic_op "); ex_i(&out, c.logic_op as i64); ex_text(&out, "name "); ex_text(&out, c.name_); ex_text(&out, "\n");
+        i = i + 1;
+    }
+    let g: i32 = 0;
+    while (g < s.*.guides.len) {
+        let w: Guide = s.*.guides.data[g];
+        ex_text(&out, "net "); ex_i(&out, w.id as i64); ex_i(&out, w.from_c as i64); ex_i(&out, w.from_p as i64);
+        ex_text(&out, "to "); ex_i(&out, w.to_c as i64); ex_i(&out, w.to_p as i64);
+        ex_text(&out, "length_nm_x1000 "); ex_i(&out, (w.length_nm * 1000.0) as i64); ex_text(&out, "\n");
+        g = g + 1;
+    }
+    let ok: bool = atomic_write_file(path, out.data[0..out.len]); list.free[u8](&out); return ok;
+}
+
+fn ex_param(out: *list.ArrayList[u8], name_: []u8, p: PhysicalParam) void {
+    ex_text(out, name_); ex_text(out, " known="); if (p.known) { ex_text(out, "1"); } else { ex_text(out, "0"); }
+    ex_text(out, " value_x1000000="); ex_i(out, (p.value * 1000000.0) as i64);
+    ex_text(out, " units="); ex_text(out, p.units); ex_text(out, " class="); ex_text(out, evidence_class_name(p.confidence));
+    ex_text(out, " source="); ex_text(out, p.source); ex_text(out, " version="); ex_text(out, p.source_version);
+    ex_text(out, " date="); ex_text(out, p.date_); ex_text(out, " method="); ex_text(out, p.method);
+    ex_text(out, " uncertainty_x1000000="); ex_i(out, (p.uncertainty * 1000000.0) as i64); ex_text(out, "\n");
+}
+
+fn export_models(s: *Scene, path: []u8) bool {
+    let out: list.ArrayList[u8] = list.make[u8](1024);
+    ex_text(&out, "# Triton device model manifest v1\nschema = "); ex_i(&out, s.*.model.schema_version as i64);
+    ex_text(&out, "\nid = "); ex_text(&out, s.*.model.id); ex_text(&out, "\n");
+    ex_param(&out, "pitch_nm", s.*.model.pitch_nm); ex_param(&out, "group_index", s.*.model.group_index);
+    ex_param(&out, "emitter_rate_ghz", s.*.model.emitter_rate_ghz); ex_param(&out, "chamber_rate_ghz", s.*.model.chamber_rate_ghz);
+    ex_param(&out, "detector_rate_ghz", s.*.model.detector_rate_ghz);
+    ex_param(&out, "emitter_wavelength_min_nm", s.*.model.emitter_wavelength_min_nm);
+    ex_param(&out, "emitter_wavelength_step_nm", s.*.model.emitter_wavelength_step_nm);
+    ex_param(&out, "chamber_resonance_nm", s.*.model.chamber_resonance_nm);
+    let ok: bool = atomic_write_file(path, out.data[0..out.len]); list.free[u8](&out); return ok;
+}
+
+fn export_report(s: *Scene, sim: *Sim, path: []u8) bool {
+    let out: list.ArrayList[u8] = list.make[u8](512);
+    ex_text(&out, "# Triton verification report v1\nverification_level = software-simulation\nfabricated_hardware = false\nlaboratory_validated = false\n");
+    ex_text(&out, "model_complete = "); if (model_complete(s.*.model)) { ex_text(&out, "true\n"); } else { ex_text(&out, "false\n"); }
+    ex_text(&out, "components = "); ex_i(&out, s.*.comps.len as i64); ex_text(&out, "\nguides = "); ex_i(&out, s.*.guides.len as i64);
+    ex_text(&out, "\nderived_clock_mhz = "); ex_i(&out, (sim.*.clock_ghz * 1000.0) as i64); ex_text(&out, "\n");
+    ex_text(&out, "clock_evidence = "); ex_text(&out, evidence_class_name(s.*.model.emitter_rate_ghz.confidence)); ex_text(&out, "\n");
+    let ok: bool = atomic_write_file(path, out.data[0..out.len]); list.free[u8](&out); return ok;
+}
+
+fn export_all(s: *Scene, sim: *Sim, prefix: []u8) bool {
+    sim_recompile(sim, s);
+    return export_bom(s, _zag_str_concat(prefix, ".bom.txt")) &&
+        export_netlist(s, _zag_str_concat(prefix, ".netlist.txt")) &&
+        export_models(s, _zag_str_concat(prefix, ".models.txt")) &&
+        export_report(s, sim, _zag_str_concat(prefix, ".report.txt"));
+}

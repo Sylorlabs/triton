@@ -1,0 +1,7 @@
+# Triton deterministic bill of materials
+plate = 64 
+chamber = 64 
+soh = 64 
+emitter = 128 
+detector = 64 
+waveguides = 192 

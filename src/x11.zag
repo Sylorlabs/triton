@@ -195,10 +195,14 @@ struct X11 {
     win_w: i32,
     win_h: i32,
     should_close: bool,
+    focused: bool,
     // Synthetic-event evidence for the live protocol selftest. Real user input
     // may interleave with SendEvent, so assertions must not depend on last-event wins.
     synth_seen: i32,
     synth_motion_mods: i32,
+    synth_resize_w: i32,
+    synth_resize_h: i32,
+    synth_focus: bool,
     // MIT-SHM shared framebuffer (fast path)
     shm_ok: bool,
     shm_attached: bool,
@@ -417,7 +421,9 @@ fn x11_connect(w: i32, h: i32, title: []u8) *X11 {
         .keys = list.make[i32](8),
         .win_w = w, .win_h = h,
         .should_close = false,
+        .focused = false,
         .synth_seen = 0, .synth_motion_mods = 0,
+        .synth_resize_w = 0, .synth_resize_h = 0, .synth_focus = false,
         .shm_ok = false, .shm_attached = false,
         .shm_id = 0, .shm_addr = 0,
         .shm_w = w, .shm_h = h, .shm_opcode = 0,
@@ -906,12 +912,21 @@ fn x_handle_event(x: *X11) void {
     if (kind == 22) {                  // ConfigureNotify
         let w: i32 = rd16(e, 20);
         let h: i32 = rd16(e, 22);
+        if (synthetic) {
+            x.*.synth_seen = x.*.synth_seen | 16;
+            x.*.synth_resize_w = w; x.*.synth_resize_h = h;
+        }
         if (w > 100 && h > 100) {
             x.*.win_w = w;
             x.*.win_h = h;
         }
         return;
     }
+    if (kind == 9) {
+        if (synthetic) { x.*.synth_seen = x.*.synth_seen | 32; x.*.synth_focus = true; }
+        x.*.focused = true; return;
+    }   // FocusIn
+    if (kind == 10) { x.*.focused = false; return; } // FocusOut
     if (kind == 33) {                  // ClientMessage
         if (synthetic) { x.*.synth_seen = x.*.synth_seen | 8; }
         let atom: i64 = rd32(e, 12);
@@ -1059,6 +1074,15 @@ fn x11_set_title(x: *X11, title: []u8) void {
     xw_bytes(req, title);
     xw_pad4(req);
     let _s: bool = x_send(x);
+}
+
+fn x11_request_resize(x: *X11, w: i32, h: i32) bool {
+    let req: *list.ArrayList[u8] = &x.*.req;
+    xw8(req, 12); xw8(req, 0); xw16(req, 5); // ConfigureWindow
+    xw32(req, x.*.wid);
+    xw16(req, 12); xw16(req, 0);             // CWWidth | CWHeight
+    xw32(req, w as i64); xw32(req, h as i64);
+    return x_send(x);
 }
 
 // ── SendEvent (self-test support) ─────────────────────────────────────────────

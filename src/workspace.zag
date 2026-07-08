@@ -639,9 +639,12 @@ fn draw_debugger(a: *App) void {
     cx = cx + draw_int(f, cx, y + 5, ps as i64, tcol);
     draw_text(f, cx, y + 5, " ps   clock ", tcol);
     cx = cx + text_w(" ps   clock ");
-    if (a.*.sim.*.clock_ghz > 0.0) {
+    if (!model_complete(a.*.scene.*.model)) {
+        draw_text(f, cx, y + 5, "Unknown (model incomplete)", th_warning());
+    } else if (a.*.sim.*.clock_ghz > 0.0) {
         cx = cx + draw_int(f, cx, y + 5, a.*.sim.*.clock_ghz as i64, tcol);
-        draw_text(f, cx, y + 5, " GHz", tcol);
+        let evidence: []u8 = evidence_class_name(a.*.scene.*.model.emitter_rate_ghz.confidence);
+        draw_text(f, cx, y + 5, _zag_str_concat(" GHz  ", evidence), tcol);
     } else {
         draw_text(f, cx, y + 5, "-- (no active parts)", tcol);
     }

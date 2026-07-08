@@ -99,6 +99,9 @@ struct App {
 }
 
 fn app_new(w: i32, h: i32) *App {
+    let default_left: i32 = clampi(w / 5, 190, 224);
+    let default_right: i32 = clampi(w / 4, 240, 306);
+    let default_bottom: i32 = clampi(h / 4, 160, 236);
     let a: *App = new(App{
         .f = fb_new(w, h),
         .scene = scene_new(),
@@ -106,9 +109,9 @@ fn app_new(w: i32, h: i32) *App {
         .cam = cam_new(),
         .inp = input_new(),
         .jrn = journal_new(),
-        .left_w = 224,
-        .right_w = 306,
-        .bottom_h = 236,
+        .left_w = default_left,
+        .right_w = default_right,
+        .bottom_h = default_bottom,
         .grab = 0,
         .tool = 0,
         .ghost_rot = 0,
@@ -158,6 +161,39 @@ fn app_new(w: i32, h: i32) *App {
     }
     app_log(a, "ready");
     return a;
+}
+
+fn app_layout_path() []u8 {
+    let env: []u8 = _zag_getenv("TRITON_LAYOUT");
+    if (env.len > 0) { return env; }
+    return ".triton/layout.cfg";
+}
+
+fn app_layout_load(a: *App) void {
+    let raw: []u8 = _zag_read_file(app_layout_path());
+    if (raw.len <= 0) { return; }
+    let vals: list.ArrayList[i64] = list.make[i64](3);
+    let pos: i32 = 0;
+    while (pos < raw.len && vals.len < 3) {
+        while (pos < raw.len && ((raw[pos] as i32) == 32 || (raw[pos] as i32) == 10)) { pos = pos + 1; }
+        let st: i32 = pos;
+        while (pos < raw.len && (raw[pos] as i32) != 32 && (raw[pos] as i32) != 10) { pos = pos + 1; }
+        if (pos > st) { list.push[i64](&vals, _zag_str_to_i64(raw[st..pos])); }
+    }
+    if (vals.len == 3) {
+        a.*.left_w = clampi(vals.data[0] as i32, 170, a.*.inp.w / 3);
+        a.*.right_w = clampi(vals.data[1] as i32, 220, (a.*.inp.w * 2) / 5);
+        a.*.bottom_h = clampi(vals.data[2] as i32, 130, (a.*.inp.h * 11) / 20);
+    }
+    list.free[i64](&vals);
+}
+
+fn app_layout_save(a: *App) bool {
+    let p1: []u8 = _zag_str_concat(_zag_i64_to_str(a.*.left_w as i64), " ");
+    let p2: []u8 = _zag_str_concat(p1, _zag_i64_to_str(a.*.right_w as i64));
+    let p3: []u8 = _zag_str_concat(p2, " ");
+    let p4: []u8 = _zag_str_concat(p3, _zag_i64_to_str(a.*.bottom_h as i64));
+    return atomic_write_file(app_layout_path(), _zag_str_concat(p4, "\n"));
 }
 
 fn app_log(a: *App, msg: []u8) void {
@@ -289,7 +325,10 @@ fn app_splitters(a: *App) void {
         if (rect_has(rh, inp.*.mx, inp.*.my)) { a.*.grab = 2; }
         if (rect_has(bh, inp.*.mx, inp.*.my)) { a.*.grab = 3; }
     }
-    if (!btn_down(inp, 0)) { a.*.grab = 0; }
+    if (!btn_down(inp, 0)) {
+        if (a.*.grab != 0) { let _saved_layout: bool = app_layout_save(a); }
+        a.*.grab = 0;
+    }
     if (a.*.grab == 1) { a.*.left_w = clampi(inp.*.mx, 170, inp.*.w / 3); }
     if (a.*.grab == 2) { a.*.right_w = clampi(inp.*.w - inp.*.mx, 220, (inp.*.w * 2) / 5); }
     if (a.*.grab == 3) { a.*.bottom_h = clampi(inp.*.h - inp.*.my - status_h(), 130, (inp.*.h * 11) / 20); }

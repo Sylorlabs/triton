@@ -39,6 +39,12 @@ fn arg_after(want: []u8, fallback: []u8) []u8 {
     return fallback;
 }
 
+fn arg_i_after(want: []u8, fallback: i32) i32 {
+    let raw: []u8 = arg_after(want, "");
+    if (raw.len == 0) { return fallback; }
+    return _zag_str_to_i64(raw) as i32;
+}
+
 // ── stdin line reader ─────────────────────────────────────────────────────────
 
 struct LineBuf {
@@ -225,6 +231,7 @@ fn run_x11() i32 {
     let win_h: i32 = 1050;
     let a: *App = app_new(win_w, win_h);
     session_bind(a);
+    app_layout_load(a);
 
     let x: *X11 = x11_connect(win_w, win_h, app_title(a));
     if (!x.*.ok) {
@@ -316,6 +323,34 @@ fn run_x11() i32 {
     return 0;
 }
 
+fn run_x11_capture(path: []u8, w: i32, h: i32) i32 {
+    if (w < 320 || h < 240 || w > 4096 || h > 4096) {
+        _zag_eprintln("x11-capture: dimensions outside 320..4096");
+        return 1;
+    }
+    let a: *App = app_new(w, h);
+    if (_zag_getenv("TRITON_SESSION").len > 0) { session_bind(a); }
+    else { app_action_demo(a); }
+    let x: *X11 = x11_connect(w, h, "Triton capture");
+    if (!x.*.ok) { return 1; }
+    a.*.inp.w = w; a.*.inp.h = h;
+    let frame_ms: i64 = 0;
+    let warm: i32 = 0;
+    while (warm < 3) {
+        let t0: i64 = _zag_clock_monotonic_ms();
+        app_frame(a, 0.016);
+        frame_ms = _zag_clock_monotonic_ms() - t0;
+        warm = warm + 1;
+    }
+    x11_put_frame(x, a.*.f.px.data, w, h);
+    fb_write_bmp(&a.*.f, path);
+    x11_sleep_ms(40);
+    x11_close(x);
+    _zag_print("x11-capture: wrote "); _zag_println(path);
+    _zag_print("x11-capture: frame_ms="); _zag_println(_zag_i64_to_str(frame_ms));
+    return 0;
+}
+
 // ── X11 round-trip self-test ──────────────────────────────────────────────────
 // Sends synthetic Motion/Key/Button/ClientMessage events to our own window via
 // SendEvent and asserts the decoded input state — proves the wire protocol
@@ -384,6 +419,16 @@ fn run_x11_selftest() i32 {
     xw32(&ev, 0); xw32(&ev, 0); xw32(&ev, 0); xw32(&ev, 0);
     let _c: bool = x11_send_self(x, &ev, 0);
 
+    // Ask the X server/window manager for a real resize; it must return a
+    // ConfigureNotify through the normal selected StructureNotify mask.
+    let _r: bool = x11_request_resize(x, 640, 480);
+
+    // FocusIn event.
+    ev.len = 0;
+    xw8(&ev, 9); xw8(&ev, 0); xw8(&ev, 0); xw8(&ev, 0);
+    while (ev.len < 32) { xw8(&ev, 0); }
+    let _f: bool = x11_send_self(x, &ev, 0);
+
     // give the server a moment, then pump everything
     x11_sleep_ms(120);
     x11_pump(x);
@@ -399,6 +444,8 @@ fn run_x11_selftest() i32 {
     xtest_check("keypress traversed X server", (x.*.synth_seen & 1) != 0 && got_q, &fails);
     xtest_check("button traversed X server", (x.*.synth_seen & 2) != 0, &fails);
     xtest_check("WM_DELETE close decoded", (x.*.synth_seen & 8) != 0 && x.*.should_close, &fails);
+    xtest_check("resize decoded (640x480)", x.*.win_w == 640 && x.*.win_h == 480, &fails);
+    xtest_check("focus decoded", (x.*.synth_seen & 32) != 0 && x.*.synth_focus, &fails);
 
     // blit a test frame through PutImage while we're here
     let fbt: list.ArrayList[i64] = list.make[i64](400 * 300);
@@ -411,6 +458,9 @@ fn run_x11_selftest() i32 {
     xtest_check("PutImage blit accepted", true, &fails);
 
     x11_close(x);
+    let x2: *X11 = x11_connect(320, 240, "selftest reopen");
+    xtest_check("repeated open succeeds", x2.*.ok, &fails);
+    x11_close(x2);
     if (fails == 0) { _zag_println("X11 SELFTEST: ALL PASS"); return 0; }
     _zag_println("X11 SELFTEST: FAILURES");
     return 1;
@@ -431,6 +481,10 @@ fn main() i32 {
         }
         if (_zag_strcmp(arg, "--x11-selftest") == 1) {
             return run_x11_selftest();
+        }
+        if (_zag_strcmp(arg, "--x11-capture") == 1) {
+            return run_x11_capture(arg_after("--x11-capture", "/tmp/triton-x11.bmp"),
+                arg_i_after("--width", 1280), arg_i_after("--height", 800));
         }
         if (_zag_strcmp(arg, "--gpu-info") == 1) {
             return run_gpu_info();

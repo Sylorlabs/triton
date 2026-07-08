@@ -29,6 +29,7 @@ extern fn _zag_read_fd(fd: i64, buf: *i8, n: i64) i64;
 @import("ternary.zag")
 @import("flash_ir.zag")
 @import("capability.zag")
+@import("export.zag")
 
 struct Tok {
     off: i32,
@@ -147,6 +148,7 @@ fn agent_help() void {
     _zag_println("sim step [n] | sim reset | sim state | render <out.bmp>");
     _zag_println("status | coords | power | perf | kinds");
     _zag_println("flash import <program.fir> | flash verify");
+    _zag_println("export <prefix>  (writes BOM, netlist, models, report)");
     _zag_println("test engine | test smoke | build");
     _zag_println("kinds: plate chamber soh emitter detector");
     agent_dot();
@@ -540,6 +542,7 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
     let required: i64 = cap_inspect();
     if (tok_eq(line, verb, "sim")) { required = cap_simulate(); }
     if (tok_eq(line, verb, "render")) { required = cap_export(); }
+    if (tok_eq(line, verb, "export")) { required = cap_export(); }
     if (tok_eq(line, verb, "save")) { required = cap_save(); }
     if (tok_eq(line, verb, "test") || tok_eq(line, verb, "build")) { required = cap_execute(); }
     if (tok_eq(line, verb, "new") || tok_eq(line, verb, "demo") ||
@@ -758,6 +761,13 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
     if (tok_eq(line, verb, "render")) {
         if (toks.*.len < 2) { agent_err("usage: render <out.bmp>"); return; }
         agent_render(a, tok_slice(line, list.get[Tok](toks, 1)));
+        return;
+    }
+    if (tok_eq(line, verb, "export")) {
+        if (toks.*.len < 2) { agent_err("usage: export <prefix>"); return; }
+        if (export_all(a.*.scene, a.*.sim, tok_slice(line, list.get[Tok](toks, 1)))) {
+            agent_ok1("exported BOM netlist models report");
+        } else { agent_err("E_EXPORT_FAILED artifact write failed"); }
         return;
     }
     if (tok_eq(line, verb, "sim")) {

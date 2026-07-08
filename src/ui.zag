@@ -5,18 +5,41 @@
 
 // ── theme ─────────────────────────────────────────────────────────────────────
 
+// Design-system spacing tokens. Layout code uses this scale instead of inventing
+// intermediate values; the 2/4/8/12/16/24 progression is the UI grid.
+fn space_2() i32 { return 2; }
+fn space_4() i32 { return 4; }
+fn space_8() i32 { return 8; }
+fn space_12() i32 { return 12; }
+fn space_16() i32 { return 16; }
+fn space_24() i32 { return 24; }
+
+// Typography roles for the current crisp bitmap face. The renderer has one
+// raster size; roles control line boxes and emphasis without blurry scaling.
+fn type_tiny_h() i32 { return 11; }
+fn type_body_h() i32 { return 14; }
+fn type_section_h() i32 { return 16; }
+fn type_viewport_h() i32 { return 14; }
+fn type_debug_h() i32 { return 13; }
+
+fn radius_control() i32 { return 0; } // pixel-precise CAD controls stay square
+fn elevation_panel() i32 { return 1; }
+
 fn th_bg() i64 { return rgb(24, 24, 27); }
 fn th_panel() i64 { return rgb(35, 35, 39); }
 fn th_panel_alt() i64 { return rgb(43, 43, 48); }
 fn th_header() i64 { return rgb(48, 48, 54); }
 fn th_outline() i64 { return rgb(14, 14, 16); }
 fn th_text() i64 { return rgb(205, 205, 210); }
-fn th_text_dim() i64 { return rgb(128, 128, 138); }
+fn th_text_dim() i64 { return rgb(158, 160, 170); }
 fn th_accent() i64 { return rgb(71, 114, 179); }     // workbench blue
 fn th_accent_hot() i64 { return rgb(96, 142, 210); }
 fn th_select() i64 { return rgb(255, 168, 40); }     // selection orange
 fn th_danger() i64 { return rgb(200, 70, 70); }
+fn th_warning() i64 { return rgb(220, 158, 64); }
 fn th_ok() i64 { return rgb(90, 200, 120); }
+fn th_disabled() i64 { return rgb(82, 82, 88); }
+fn th_focus() i64 { return rgb(126, 166, 230); }
 fn th_vp_bg() i64 { return rgb(16, 16, 20); }
 
 // ── geometry ──────────────────────────────────────────────────────────────────

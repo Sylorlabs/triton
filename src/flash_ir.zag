@@ -136,8 +136,9 @@ fn flash_build_scene(s: *Scene, ir: *FlashIr) bool {
         let ea: i32 = scene_place(s, Kind.Emitter, vox(ox, 1, oz + 1), 0);
         let eb: i32 = scene_place(s, Kind.Emitter, vox(ox, 1, oz + 5), 0);
         let chamber: i32 = scene_place(s, Kind.Chamber, vox(ox + 3, 1, oz + 3), 0);
+        let memory: i32 = scene_place(s, Kind.Soh, vox(ox + 4, 1, oz + 1), 0);
         let detector: i32 = scene_place(s, Kind.Detector, vox(ox + 7, 1, oz + 4), 0);
-        if (plate < 0 || ea < 0 || eb < 0 || chamber < 0 || detector < 0) { return false; }
+        if (plate < 0 || ea < 0 || eb < 0 || chamber < 0 || memory < 0 || detector < 0) { return false; }
         s.*.comps.data[scene_comp_index(s, ea)].preset = flash_preset(op.a);
         s.*.comps.data[scene_comp_index(s, eb)].preset = flash_preset(op.b);
         s.*.comps.data[scene_comp_index(s, chamber)].logic_op = op.lattice_op;

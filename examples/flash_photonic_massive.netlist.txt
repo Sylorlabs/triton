@@ -1,0 +1,577 @@
+# Triton netlist v1
+component 1  plate xyz 0 0 0 logic_op 0 name GeSn Plate.1
+component 2  emitter xyz 0 1 1 logic_op 0 name WDM Emitter.1
+component 3  emitter xyz 0 1 5 logic_op 0 name WDM Emitter.2
+component 4  chamber xyz 3 1 3 logic_op 3 name Exec Chamber.1
+component 5  soh xyz 4 1 1 logic_op 0 name SOH Tile.1
+component 6  detector xyz 7 1 4 logic_op 0 name MoS2 Sensor.1
+component 7  plate xyz 12 0 0 logic_op 0 name GeSn Plate.2
+component 8  emitter xyz 12 1 1 logic_op 0 name WDM Emitter.3
+component 9  emitter xyz 12 1 5 logic_op 0 name WDM Emitter.4
+component 10  chamber xyz 15 1 3 logic_op 5 name Exec Chamber.2
+component 11  soh xyz 16 1 1 logic_op 0 name SOH Tile.2
+component 12  detector xyz 19 1 4 logic_op 0 name MoS2 Sensor.2
+component 13  plate xyz 24 0 0 logic_op 0 name GeSn Plate.3
+component 14  emitter xyz 24 1 1 logic_op 0 name WDM Emitter.5
+component 15  emitter xyz 24 1 5 logic_op 0 name WDM Emitter.6
+component 16  chamber xyz 27 1 3 logic_op 7 name Exec Chamber.3
+component 17  soh xyz 28 1 1 logic_op 0 name SOH Tile.3
+component 18  detector xyz 31 1 4 logic_op 0 name MoS2 Sensor.3
+component 19  plate xyz 36 0 0 logic_op 0 name GeSn Plate.4
+component 20  emitter xyz 36 1 1 logic_op 0 name WDM Emitter.7
+component 21  emitter xyz 36 1 5 logic_op 0 name WDM Emitter.8
+component 22  chamber xyz 39 1 3 logic_op 2 name Exec Chamber.4
+component 23  soh xyz 40 1 1 logic_op 0 name SOH Tile.4
+component 24  detector xyz 43 1 4 logic_op 0 name MoS2 Sensor.4
+component 25  plate xyz 48 0 0 logic_op 0 name GeSn Plate.5
+component 26  emitter xyz 48 1 1 logic_op 0 name WDM Emitter.9
+component 27  emitter xyz 48 1 5 logic_op 0 name WDM Emitter.10
+component 28  chamber xyz 51 1 3 logic_op 3 name Exec Chamber.5
+component 29  soh xyz 52 1 1 logic_op 0 name SOH Tile.5
+component 30  detector xyz 55 1 4 logic_op 0 name MoS2 Sensor.5
+component 31  plate xyz 60 0 0 logic_op 0 name GeSn Plate.6
+component 32  emitter xyz 60 1 1 logic_op 0 name WDM Emitter.11
+component 33  emitter xyz 60 1 5 logic_op 0 name WDM Emitter.12
+component 34  chamber xyz 63 1 3 logic_op 5 name Exec Chamber.6
+component 35  soh xyz 64 1 1 logic_op 0 name SOH Tile.6
+component 36  detector xyz 67 1 4 logic_op 0 name MoS2 Sensor.6
+component 37  plate xyz 72 0 0 logic_op 0 name GeSn Plate.7
+component 38  emitter xyz 72 1 1 logic_op 0 name WDM Emitter.13
+component 39  emitter xyz 72 1 5 logic_op 0 name WDM Emitter.14
+component 40  chamber xyz 75 1 3 logic_op 7 name Exec Chamber.7
+component 41  soh xyz 76 1 1 logic_op 0 name SOH Tile.7
+component 42  detector xyz 79 1 4 logic_op 0 name MoS2 Sensor.7
+component 43  plate xyz 84 0 0 logic_op 0 name GeSn Plate.8
+component 44  emitter xyz 84 1 1 logic_op 0 name WDM Emitter.15
+component 45  emitter xyz 84 1 5 logic_op 0 name WDM Emitter.16
+component 46  chamber xyz 87 1 3 logic_op 2 name Exec Chamber.8
+component 47  soh xyz 88 1 1 logic_op 0 name SOH Tile.8
+component 48  detector xyz 91 1 4 logic_op 0 name MoS2 Sensor.8
+component 49  plate xyz 0 0 12 logic_op 0 name GeSn Plate.9
+component 50  emitter xyz 0 1 13 logic_op 0 name WDM Emitter.17
+component 51  emitter xyz 0 1 17 logic_op 0 name WDM Emitter.18
+component 52  chamber xyz 3 1 15 logic_op 3 name Exec Chamber.9
+component 53  soh xyz 4 1 13 logic_op 0 name SOH Tile.9
+component 54  detector xyz 7 1 16 logic_op 0 name MoS2 Sensor.9
+component 55  plate xyz 12 0 12 logic_op 0 name GeSn Plate.10
+component 56  emitter xyz 12 1 13 logic_op 0 name WDM Emitter.19
+component 57  emitter xyz 12 1 17 logic_op 0 name WDM Emitter.20
+component 58  chamber xyz 15 1 15 logic_op 5 name Exec Chamber.10
+component 59  soh xyz 16 1 13 logic_op 0 name SOH Tile.10
+component 60  detector xyz 19 1 16 logic_op 0 name MoS2 Sensor.10
+component 61  plate xyz 24 0 12 logic_op 0 name GeSn Plate.11
+component 62  emitter xyz 24 1 13 logic_op 0 name WDM Emitter.21
+component 63  emitter xyz 24 1 17 logic_op 0 name WDM Emitter.22
+component 64  chamber xyz 27 1 15 logic_op 7 name Exec Chamber.11
+component 65  soh xyz 28 1 13 logic_op 0 name SOH Tile.11
+component 66  detector xyz 31 1 16 logic_op 0 name MoS2 Sensor.11
+component 67  plate xyz 36 0 12 logic_op 0 name GeSn Plate.12
+component 68  emitter xyz 36 1 13 logic_op 0 name WDM Emitter.23
+component 69  emitter xyz 36 1 17 logic_op 0 name WDM Emitter.24
+component 70  chamber xyz 39 1 15 logic_op 2 name Exec Chamber.12
+component 71  soh xyz 40 1 13 logic_op 0 name SOH Tile.12
+component 72  detector xyz 43 1 16 logic_op 0 name MoS2 Sensor.12
+component 73  plate xyz 48 0 12 logic_op 0 name GeSn Plate.13
+component 74  emitter xyz 48 1 13 logic_op 0 name WDM Emitter.25
+component 75  emitter xyz 48 1 17 logic_op 0 name WDM Emitter.26
+component 76  chamber xyz 51 1 15 logic_op 3 name Exec Chamber.13
+component 77  soh xyz 52 1 13 logic_op 0 name SOH Tile.13
+component 78  detector xyz 55 1 16 logic_op 0 name MoS2 Sensor.13
+component 79  plate xyz 60 0 12 logic_op 0 name GeSn Plate.14
+component 80  emitter xyz 60 1 13 logic_op 0 name WDM Emitter.27
+component 81  emitter xyz 60 1 17 logic_op 0 name WDM Emitter.28
+component 82  chamber xyz 63 1 15 logic_op 5 name Exec Chamber.14
+component 83  soh xyz 64 1 13 logic_op 0 name SOH Tile.14
+component 84  detector xyz 67 1 16 logic_op 0 name MoS2 Sensor.14
+component 85  plate xyz 72 0 12 logic_op 0 name GeSn Plate.15
+component 86  emitter xyz 72 1 13 logic_op 0 name WDM Emitter.29
+component 87  emitter xyz 72 1 17 logic_op 0 name WDM Emitter.30
+component 88  chamber xyz 75 1 15 logic_op 7 name Exec Chamber.15
+component 89  soh xyz 76 1 13 logic_op 0 name SOH Tile.15
+component 90  detector xyz 79 1 16 logic_op 0 name MoS2 Sensor.15
+component 91  plate xyz 84 0 12 logic_op 0 name GeSn Plate.16
+component 92  emitter xyz 84 1 13 logic_op 0 name WDM Emitter.31
+component 93  emitter xyz 84 1 17 logic_op 0 name WDM Emitter.32
+component 94  chamber xyz 87 1 15 logic_op 2 name Exec Chamber.16
+component 95  soh xyz 88 1 13 logic_op 0 name SOH Tile.16
+component 96  detector xyz 91 1 16 logic_op 0 name MoS2 Sensor.16
+component 97  plate xyz 0 0 24 logic_op 0 name GeSn Plate.17
+component 98  emitter xyz 0 1 25 logic_op 0 name WDM Emitter.33
+component 99  emitter xyz 0 1 29 logic_op 0 name WDM Emitter.34
+component 100  chamber xyz 3 1 27 logic_op 3 name Exec Chamber.17
+component 101  soh xyz 4 1 25 logic_op 0 name SOH Tile.17
+component 102  detector xyz 7 1 28 logic_op 0 name MoS2 Sensor.17
+component 103  plate xyz 12 0 24 logic_op 0 name GeSn Plate.18
+component 104  emitter xyz 12 1 25 logic_op 0 name WDM Emitter.35
+component 105  emitter xyz 12 1 29 logic_op 0 name WDM Emitter.36
+component 106  chamber xyz 15 1 27 logic_op 5 name Exec Chamber.18
+component 107  soh xyz 16 1 25 logic_op 0 name SOH Tile.18
+component 108  detector xyz 19 1 28 logic_op 0 name MoS2 Sensor.18
+component 109  plate xyz 24 0 24 logic_op 0 name GeSn Plate.19
+component 110  emitter xyz 24 1 25 logic_op 0 name WDM Emitter.37
+component 111  emitter xyz 24 1 29 logic_op 0 name WDM Emitter.38
+component 112  chamber xyz 27 1 27 logic_op 7 name Exec Chamber.19
+component 113  soh xyz 28 1 25 logic_op 0 name SOH Tile.19
+component 114  detector xyz 31 1 28 logic_op 0 name MoS2 Sensor.19
+component 115  plate xyz 36 0 24 logic_op 0 name GeSn Plate.20
+component 116  emitter xyz 36 1 25 logic_op 0 name WDM Emitter.39
+component 117  emitter xyz 36 1 29 logic_op 0 name WDM Emitter.40
+component 118  chamber xyz 39 1 27 logic_op 2 name Exec Chamber.20
+component 119  soh xyz 40 1 25 logic_op 0 name SOH Tile.20
+component 120  detector xyz 43 1 28 logic_op 0 name MoS2 Sensor.20
+component 121  plate xyz 48 0 24 logic_op 0 name GeSn Plate.21
+component 122  emitter xyz 48 1 25 logic_op 0 name WDM Emitter.41
+component 123  emitter xyz 48 1 29 logic_op 0 name WDM Emitter.42
+component 124  chamber xyz 51 1 27 logic_op 3 name Exec Chamber.21
+component 125  soh xyz 52 1 25 logic_op 0 name SOH Tile.21
+component 126  detector xyz 55 1 28 logic_op 0 name MoS2 Sensor.21
+component 127  plate xyz 60 0 24 logic_op 0 name GeSn Plate.22
+component 128  emitter xyz 60 1 25 logic_op 0 name WDM Emitter.43
+component 129  emitter xyz 60 1 29 logic_op 0 name WDM Emitter.44
+component 130  chamber xyz 63 1 27 logic_op 5 name Exec Chamber.22
+component 131  soh xyz 64 1 25 logic_op 0 name SOH Tile.22
+component 132  detector xyz 67 1 28 logic_op 0 name MoS2 Sensor.22
+component 133  plate xyz 72 0 24 logic_op 0 name GeSn Plate.23
+component 134  emitter xyz 72 1 25 logic_op 0 name WDM Emitter.45
+component 135  emitter xyz 72 1 29 logic_op 0 name WDM Emitter.46
+component 136  chamber xyz 75 1 27 logic_op 7 name Exec Chamber.23
+component 137  soh xyz 76 1 25 logic_op 0 name SOH Tile.23
+component 138  detector xyz 79 1 28 logic_op 0 name MoS2 Sensor.23
+component 139  plate xyz 84 0 24 logic_op 0 name GeSn Plate.24
+component 140  emitter xyz 84 1 25 logic_op 0 name WDM Emitter.47
+component 141  emitter xyz 84 1 29 logic_op 0 name WDM Emitter.48
+component 142  chamber xyz 87 1 27 logic_op 2 name Exec Chamber.24
+component 143  soh xyz 88 1 25 logic_op 0 name SOH Tile.24
+component 144  detector xyz 91 1 28 logic_op 0 name MoS2 Sensor.24
+component 145  plate xyz 0 0 36 logic_op 0 name GeSn Plate.25
+component 146  emitter xyz 0 1 37 logic_op 0 name WDM Emitter.49
+component 147  emitter xyz 0 1 41 logic_op 0 name WDM Emitter.50
+component 148  chamber xyz 3 1 39 logic_op 3 name Exec Chamber.25
+component 149  soh xyz 4 1 37 logic_op 0 name SOH Tile.25
+component 150  detector xyz 7 1 40 logic_op 0 name MoS2 Sensor.25
+component 151  plate xyz 12 0 36 logic_op 0 name GeSn Plate.26
+component 152  emitter xyz 12 1 37 logic_op 0 name WDM Emitter.51
+component 153  emitter xyz 12 1 41 logic_op 0 name WDM Emitter.52
+component 154  chamber xyz 15 1 39 logic_op 5 name Exec Chamber.26
+component 155  soh xyz 16 1 37 logic_op 0 name SOH Tile.26
+component 156  detector xyz 19 1 40 logic_op 0 name MoS2 Sensor.26
+component 157  plate xyz 24 0 36 logic_op 0 name GeSn Plate.27
+component 158  emitter xyz 24 1 37 logic_op 0 name WDM Emitter.53
+component 159  emitter xyz 24 1 41 logic_op 0 name WDM Emitter.54
+component 160  chamber xyz 27 1 39 logic_op 7 name Exec Chamber.27
+component 161  soh xyz 28 1 37 logic_op 0 name SOH Tile.27
+component 162  detector xyz 31 1 40 logic_op 0 name MoS2 Sensor.27
+component 163  plate xyz 36 0 36 logic_op 0 name GeSn Plate.28
+component 164  emitter xyz 36 1 37 logic_op 0 name WDM Emitter.55
+component 165  emitter xyz 36 1 41 logic_op 0 name WDM Emitter.56
+component 166  chamber xyz 39 1 39 logic_op 2 name Exec Chamber.28
+component 167  soh xyz 40 1 37 logic_op 0 name SOH Tile.28
+component 168  detector xyz 43 1 40 logic_op 0 name MoS2 Sensor.28
+component 169  plate xyz 48 0 36 logic_op 0 name GeSn Plate.29
+component 170  emitter xyz 48 1 37 logic_op 0 name WDM Emitter.57
+component 171  emitter xyz 48 1 41 logic_op 0 name WDM Emitter.58
+component 172  chamber xyz 51 1 39 logic_op 3 name Exec Chamber.29
+component 173  soh xyz 52 1 37 logic_op 0 name SOH Tile.29
+component 174  detector xyz 55 1 40 logic_op 0 name MoS2 Sensor.29
+component 175  plate xyz 60 0 36 logic_op 0 name GeSn Plate.30
+component 176  emitter xyz 60 1 37 logic_op 0 name WDM Emitter.59
+component 177  emitter xyz 60 1 41 logic_op 0 name WDM Emitter.60
+component 178  chamber xyz 63 1 39 logic_op 5 name Exec Chamber.30
+component 179  soh xyz 64 1 37 logic_op 0 name SOH Tile.30
+component 180  detector xyz 67 1 40 logic_op 0 name MoS2 Sensor.30
+component 181  plate xyz 72 0 36 logic_op 0 name GeSn Plate.31
+component 182  emitter xyz 72 1 37 logic_op 0 name WDM Emitter.61
+component 183  emitter xyz 72 1 41 logic_op 0 name WDM Emitter.62
+component 184  chamber xyz 75 1 39 logic_op 7 name Exec Chamber.31
+component 185  soh xyz 76 1 37 logic_op 0 name SOH Tile.31
+component 186  detector xyz 79 1 40 logic_op 0 name MoS2 Sensor.31
+component 187  plate xyz 84 0 36 logic_op 0 name GeSn Plate.32
+component 188  emitter xyz 84 1 37 logic_op 0 name WDM Emitter.63
+component 189  emitter xyz 84 1 41 logic_op 0 name WDM Emitter.64
+component 190  chamber xyz 87 1 39 logic_op 2 name Exec Chamber.32
+component 191  soh xyz 88 1 37 logic_op 0 name SOH Tile.32
+component 192  detector xyz 91 1 40 logic_op 0 name MoS2 Sensor.32
+component 193  plate xyz 0 0 48 logic_op 0 name GeSn Plate.33
+component 194  emitter xyz 0 1 49 logic_op 0 name WDM Emitter.65
+component 195  emitter xyz 0 1 53 logic_op 0 name WDM Emitter.66
+component 196  chamber xyz 3 1 51 logic_op 3 name Exec Chamber.33
+component 197  soh xyz 4 1 49 logic_op 0 name SOH Tile.33
+component 198  detector xyz 7 1 52 logic_op 0 name MoS2 Sensor.33
+component 199  plate xyz 12 0 48 logic_op 0 name GeSn Plate.34
+component 200  emitter xyz 12 1 49 logic_op 0 name WDM Emitter.67
+component 201  emitter xyz 12 1 53 logic_op 0 name WDM Emitter.68
+component 202  chamber xyz 15 1 51 logic_op 5 name Exec Chamber.34
+component 203  soh xyz 16 1 49 logic_op 0 name SOH Tile.34
+component 204  detector xyz 19 1 52 logic_op 0 name MoS2 Sensor.34
+component 205  plate xyz 24 0 48 logic_op 0 name GeSn Plate.35
+component 206  emitter xyz 24 1 49 logic_op 0 name WDM Emitter.69
+component 207  emitter xyz 24 1 53 logic_op 0 name WDM Emitter.70
+component 208  chamber xyz 27 1 51 logic_op 7 name Exec Chamber.35
+component 209  soh xyz 28 1 49 logic_op 0 name SOH Tile.35
+component 210  detector xyz 31 1 52 logic_op 0 name MoS2 Sensor.35
+component 211  plate xyz 36 0 48 logic_op 0 name GeSn Plate.36
+component 212  emitter xyz 36 1 49 logic_op 0 name WDM Emitter.71
+component 213  emitter xyz 36 1 53 logic_op 0 name WDM Emitter.72
+component 214  chamber xyz 39 1 51 logic_op 2 name Exec Chamber.36
+component 215  soh xyz 40 1 49 logic_op 0 name SOH Tile.36
+component 216  detector xyz 43 1 52 logic_op 0 name MoS2 Sensor.36
+component 217  plate xyz 48 0 48 logic_op 0 name GeSn Plate.37
+component 218  emitter xyz 48 1 49 logic_op 0 name WDM Emitter.73
+component 219  emitter xyz 48 1 53 logic_op 0 name WDM Emitter.74
+component 220  chamber xyz 51 1 51 logic_op 3 name Exec Chamber.37
+component 221  soh xyz 52 1 49 logic_op 0 name SOH Tile.37
+component 222  detector xyz 55 1 52 logic_op 0 name MoS2 Sensor.37
+component 223  plate xyz 60 0 48 logic_op 0 name GeSn Plate.38
+component 224  emitter xyz 60 1 49 logic_op 0 name WDM Emitter.75
+component 225  emitter xyz 60 1 53 logic_op 0 name WDM Emitter.76
+component 226  chamber xyz 63 1 51 logic_op 5 name Exec Chamber.38
+component 227  soh xyz 64 1 49 logic_op 0 name SOH Tile.38
+component 228  detector xyz 67 1 52 logic_op 0 name MoS2 Sensor.38
+component 229  plate xyz 72 0 48 logic_op 0 name GeSn Plate.39
+component 230  emitter xyz 72 1 49 logic_op 0 name WDM Emitter.77
+component 231  emitter xyz 72 1 53 logic_op 0 name WDM Emitter.78
+component 232  chamber xyz 75 1 51 logic_op 7 name Exec Chamber.39
+component 233  soh xyz 76 1 49 logic_op 0 name SOH Tile.39
+component 234  detector xyz 79 1 52 logic_op 0 name MoS2 Sensor.39
+component 235  plate xyz 84 0 48 logic_op 0 name GeSn Plate.40
+component 236  emitter xyz 84 1 49 logic_op 0 name WDM Emitter.79
+component 237  emitter xyz 84 1 53 logic_op 0 name WDM Emitter.80
+component 238  chamber xyz 87 1 51 logic_op 2 name Exec Chamber.40
+component 239  soh xyz 88 1 49 logic_op 0 name SOH Tile.40
+component 240  detector xyz 91 1 52 logic_op 0 name MoS2 Sensor.40
+component 241  plate xyz 0 0 60 logic_op 0 name GeSn Plate.41
+component 242  emitter xyz 0 1 61 logic_op 0 name WDM Emitter.81
+component 243  emitter xyz 0 1 65 logic_op 0 name WDM Emitter.82
+component 244  chamber xyz 3 1 63 logic_op 3 name Exec Chamber.41
+component 245  soh xyz 4 1 61 logic_op 0 name SOH Tile.41
+component 246  detector xyz 7 1 64 logic_op 0 name MoS2 Sensor.41
+component 247  plate xyz 12 0 60 logic_op 0 name GeSn Plate.42
+component 248  emitter xyz 12 1 61 logic_op 0 name WDM Emitter.83
+component 249  emitter xyz 12 1 65 logic_op 0 name WDM Emitter.84
+component 250  chamber xyz 15 1 63 logic_op 5 name Exec Chamber.42
+component 251  soh xyz 16 1 61 logic_op 0 name SOH Tile.42
+component 252  detector xyz 19 1 64 logic_op 0 name MoS2 Sensor.42
+component 253  plate xyz 24 0 60 logic_op 0 name GeSn Plate.43
+component 254  emitter xyz 24 1 61 logic_op 0 name WDM Emitter.85
+component 255  emitter xyz 24 1 65 logic_op 0 name WDM Emitter.86
+component 256  chamber xyz 27 1 63 logic_op 7 name Exec Chamber.43
+component 257  soh xyz 28 1 61 logic_op 0 name SOH Tile.43
+component 258  detector xyz 31 1 64 logic_op 0 name MoS2 Sensor.43
+component 259  plate xyz 36 0 60 logic_op 0 name GeSn Plate.44
+component 260  emitter xyz 36 1 61 logic_op 0 name WDM Emitter.87
+component 261  emitter xyz 36 1 65 logic_op 0 name WDM Emitter.88
+component 262  chamber xyz 39 1 63 logic_op 2 name Exec Chamber.44
+component 263  soh xyz 40 1 61 logic_op 0 name SOH Tile.44
+component 264  detector xyz 43 1 64 logic_op 0 name MoS2 Sensor.44
+component 265  plate xyz 48 0 60 logic_op 0 name GeSn Plate.45
+component 266  emitter xyz 48 1 61 logic_op 0 name WDM Emitter.89
+component 267  emitter xyz 48 1 65 logic_op 0 name WDM Emitter.90
+component 268  chamber xyz 51 1 63 logic_op 3 name Exec Chamber.45
+component 269  soh xyz 52 1 61 logic_op 0 name SOH Tile.45
+component 270  detector xyz 55 1 64 logic_op 0 name MoS2 Sensor.45
+component 271  plate xyz 60 0 60 logic_op 0 name GeSn Plate.46
+component 272  emitter xyz 60 1 61 logic_op 0 name WDM Emitter.91
+component 273  emitter xyz 60 1 65 logic_op 0 name WDM Emitter.92
+component 274  chamber xyz 63 1 63 logic_op 5 name Exec Chamber.46
+component 275  soh xyz 64 1 61 logic_op 0 name SOH Tile.46
+component 276  detector xyz 67 1 64 logic_op 0 name MoS2 Sensor.46
+component 277  plate xyz 72 0 60 logic_op 0 name GeSn Plate.47
+component 278  emitter xyz 72 1 61 logic_op 0 name WDM Emitter.93
+component 279  emitter xyz 72 1 65 logic_op 0 name WDM Emitter.94
+component 280  chamber xyz 75 1 63 logic_op 7 name Exec Chamber.47
+component 281  soh xyz 76 1 61 logic_op 0 name SOH Tile.47
+component 282  detector xyz 79 1 64 logic_op 0 name MoS2 Sensor.47
+component 283  plate xyz 84 0 60 logic_op 0 name GeSn Plate.48
+component 284  emitter xyz 84 1 61 logic_op 0 name WDM Emitter.95
+component 285  emitter xyz 84 1 65 logic_op 0 name WDM Emitter.96
+component 286  chamber xyz 87 1 63 logic_op 2 name Exec Chamber.48
+component 287  soh xyz 88 1 61 logic_op 0 name SOH Tile.48
+component 288  detector xyz 91 1 64 logic_op 0 name MoS2 Sensor.48
+component 289  plate xyz 0 0 72 logic_op 0 name GeSn Plate.49
+component 290  emitter xyz 0 1 73 logic_op 0 name WDM Emitter.97
+component 291  emitter xyz 0 1 77 logic_op 0 name WDM Emitter.98
+component 292  chamber xyz 3 1 75 logic_op 3 name Exec Chamber.49
+component 293  soh xyz 4 1 73 logic_op 0 name SOH Tile.49
+component 294  detector xyz 7 1 76 logic_op 0 name MoS2 Sensor.49
+component 295  plate xyz 12 0 72 logic_op 0 name GeSn Plate.50
+component 296  emitter xyz 12 1 73 logic_op 0 name WDM Emitter.99
+component 297  emitter xyz 12 1 77 logic_op 0 name WDM Emitter.100
+component 298  chamber xyz 15 1 75 logic_op 5 name Exec Chamber.50
+component 299  soh xyz 16 1 73 logic_op 0 name SOH Tile.50
+component 300  detector xyz 19 1 76 logic_op 0 name MoS2 Sensor.50
+component 301  plate xyz 24 0 72 logic_op 0 name GeSn Plate.51
+component 302  emitter xyz 24 1 73 logic_op 0 name WDM Emitter.101
+component 303  emitter xyz 24 1 77 logic_op 0 name WDM Emitter.102
+component 304  chamber xyz 27 1 75 logic_op 7 name Exec Chamber.51
+component 305  soh xyz 28 1 73 logic_op 0 name SOH Tile.51
+component 306  detector xyz 31 1 76 logic_op 0 name MoS2 Sensor.51
+component 307  plate xyz 36 0 72 logic_op 0 name GeSn Plate.52
+component 308  emitter xyz 36 1 73 logic_op 0 name WDM Emitter.103
+component 309  emitter xyz 36 1 77 logic_op 0 name WDM Emitter.104
+component 310  chamber xyz 39 1 75 logic_op 2 name Exec Chamber.52
+component 311  soh xyz 40 1 73 logic_op 0 name SOH Tile.52
+component 312  detector xyz 43 1 76 logic_op 0 name MoS2 Sensor.52
+component 313  plate xyz 48 0 72 logic_op 0 name GeSn Plate.53
+component 314  emitter xyz 48 1 73 logic_op 0 name WDM Emitter.105
+component 315  emitter xyz 48 1 77 logic_op 0 name WDM Emitter.106
+component 316  chamber xyz 51 1 75 logic_op 3 name Exec Chamber.53
+component 317  soh xyz 52 1 73 logic_op 0 name SOH Tile.53
+component 318  detector xyz 55 1 76 logic_op 0 name MoS2 Sensor.53
+component 319  plate xyz 60 0 72 logic_op 0 name GeSn Plate.54
+component 320  emitter xyz 60 1 73 logic_op 0 name WDM Emitter.107
+component 321  emitter xyz 60 1 77 logic_op 0 name WDM Emitter.108
+component 322  chamber xyz 63 1 75 logic_op 5 name Exec Chamber.54
+component 323  soh xyz 64 1 73 logic_op 0 name SOH Tile.54
+component 324  detector xyz 67 1 76 logic_op 0 name MoS2 Sensor.54
+component 325  plate xyz 72 0 72 logic_op 0 name GeSn Plate.55
+component 326  emitter xyz 72 1 73 logic_op 0 name WDM Emitter.109
+component 327  emitter xyz 72 1 77 logic_op 0 name WDM Emitter.110
+component 328  chamber xyz 75 1 75 logic_op 7 name Exec Chamber.55
+component 329  soh xyz 76 1 73 logic_op 0 name SOH Tile.55
+component 330  detector xyz 79 1 76 logic_op 0 name MoS2 Sensor.55
+component 331  plate xyz 84 0 72 logic_op 0 name GeSn Plate.56
+component 332  emitter xyz 84 1 73 logic_op 0 name WDM Emitter.111
+component 333  emitter xyz 84 1 77 logic_op 0 name WDM Emitter.112
+component 334  chamber xyz 87 1 75 logic_op 2 name Exec Chamber.56
+component 335  soh xyz 88 1 73 logic_op 0 name SOH Tile.56
+component 336  detector xyz 91 1 76 logic_op 0 name MoS2 Sensor.56
+component 337  plate xyz 0 0 84 logic_op 0 name GeSn Plate.57
+component 338  emitter xyz 0 1 85 logic_op 0 name WDM Emitter.113
+component 339  emitter xyz 0 1 89 logic_op 0 name WDM Emitter.114
+component 340  chamber xyz 3 1 87 logic_op 3 name Exec Chamber.57
+component 341  soh xyz 4 1 85 logic_op 0 name SOH Tile.57
+component 342  detector xyz 7 1 88 logic_op 0 name MoS2 Sensor.57
+component 343  plate xyz 12 0 84 logic_op 0 name GeSn Plate.58
+component 344  emitter xyz 12 1 85 logic_op 0 name WDM Emitter.115
+component 345  emitter xyz 12 1 89 logic_op 0 name WDM Emitter.116
+component 346  chamber xyz 15 1 87 logic_op 5 name Exec Chamber.58
+component 347  soh xyz 16 1 85 logic_op 0 name SOH Tile.58
+component 348  detector xyz 19 1 88 logic_op 0 name MoS2 Sensor.58
+component 349  plate xyz 24 0 84 logic_op 0 name GeSn Plate.59
+component 350  emitter xyz 24 1 85 logic_op 0 name WDM Emitter.117
+component 351  emitter xyz 24 1 89 logic_op 0 name WDM Emitter.118
+component 352  chamber xyz 27 1 87 logic_op 7 name Exec Chamber.59
+component 353  soh xyz 28 1 85 logic_op 0 name SOH Tile.59
+component 354  detector xyz 31 1 88 logic_op 0 name MoS2 Sensor.59
+component 355  plate xyz 36 0 84 logic_op 0 name GeSn Plate.60
+component 356  emitter xyz 36 1 85 logic_op 0 name WDM Emitter.119
+component 357  emitter xyz 36 1 89 logic_op 0 name WDM Emitter.120
+component 358  chamber xyz 39 1 87 logic_op 2 name Exec Chamber.60
+component 359  soh xyz 40 1 85 logic_op 0 name SOH Tile.60
+component 360  detector xyz 43 1 88 logic_op 0 name MoS2 Sensor.60
+component 361  plate xyz 48 0 84 logic_op 0 name GeSn Plate.61
+component 362  emitter xyz 48 1 85 logic_op 0 name WDM Emitter.121
+component 363  emitter xyz 48 1 89 logic_op 0 name WDM Emitter.122
+component 364  chamber xyz 51 1 87 logic_op 3 name Exec Chamber.61
+component 365  soh xyz 52 1 85 logic_op 0 name SOH Tile.61
+component 366  detector xyz 55 1 88 logic_op 0 name MoS2 Sensor.61
+component 367  plate xyz 60 0 84 logic_op 0 name GeSn Plate.62
+component 368  emitter xyz 60 1 85 logic_op 0 name WDM Emitter.123
+component 369  emitter xyz 60 1 89 logic_op 0 name WDM Emitter.124
+component 370  chamber xyz 63 1 87 logic_op 5 name Exec Chamber.62
+component 371  soh xyz 64 1 85 logic_op 0 name SOH Tile.62
+component 372  detector xyz 67 1 88 logic_op 0 name MoS2 Sensor.62
+component 373  plate xyz 72 0 84 logic_op 0 name GeSn Plate.63
+component 374  emitter xyz 72 1 85 logic_op 0 name WDM Emitter.125
+component 375  emitter xyz 72 1 89 logic_op 0 name WDM Emitter.126
+component 376  chamber xyz 75 1 87 logic_op 7 name Exec Chamber.63
+component 377  soh xyz 76 1 85 logic_op 0 name SOH Tile.63
+component 378  detector xyz 79 1 88 logic_op 0 name MoS2 Sensor.63
+component 379  plate xyz 84 0 84 logic_op 0 name GeSn Plate.64
+component 380  emitter xyz 84 1 85 logic_op 0 name WDM Emitter.127
+component 381  emitter xyz 84 1 89 logic_op 0 name WDM Emitter.128
+component 382  chamber xyz 87 1 87 logic_op 2 name Exec Chamber.64
+component 383  soh xyz 88 1 85 logic_op 0 name SOH Tile.64
+component 384  detector xyz 91 1 88 logic_op 0 name MoS2 Sensor.64
+net 1 2 0 to 4 0 length_nm_x1000 750000 
+net 2 3 0 to 4 1 length_nm_x1000 500000 
+net 3 4 3 to 6 0 length_nm_x1000 500000 
+net 4 8 0 to 10 0 length_nm_x1000 750000 
+net 5 9 0 to 10 1 length_nm_x1000 500000 
+net 6 10 3 to 12 0 length_nm_x1000 500000 
+net 7 14 0 to 16 0 length_nm_x1000 750000 
+net 8 15 0 to 16 1 length_nm_x1000 500000 
+net 9 16 3 to 18 0 length_nm_x1000 500000 
+net 10 20 0 to 22 0 length_nm_x1000 750000 
+net 11 21 0 to 22 1 length_nm_x1000 500000 
+net 12 22 3 to 24 0 length_nm_x1000 500000 
+net 13 26 0 to 28 0 length_nm_x1000 750000 
+net 14 27 0 to 28 1 length_nm_x1000 500000 
+net 15 28 3 to 30 0 length_nm_x1000 500000 
+net 16 32 0 to 34 0 length_nm_x1000 750000 
+net 17 33 0 to 34 1 length_nm_x1000 500000 
+net 18 34 3 to 36 0 length_nm_x1000 500000 
+net 19 38 0 to 40 0 length_nm_x1000 750000 
+net 20 39 0 to 40 1 length_nm_x1000 500000 
+net 21 40 3 to 42 0 length_nm_x1000 500000 
+net 22 44 0 to 46 0 length_nm_x1000 750000 
+net 23 45 0 to 46 1 length_nm_x1000 500000 
+net 24 46 3 to 48 0 length_nm_x1000 500000 
+net 25 50 0 to 52 0 length_nm_x1000 750000 
+net 26 51 0 to 52 1 length_nm_x1000 500000 
+net 27 52 3 to 54 0 length_nm_x1000 500000 
+net 28 56 0 to 58 0 length_nm_x1000 750000 
+net 29 57 0 to 58 1 length_nm_x1000 500000 
+net 30 58 3 to 60 0 length_nm_x1000 500000 
+net 31 62 0 to 64 0 length_nm_x1000 750000 
+net 32 63 0 to 64 1 length_nm_x1000 500000 
+net 33 64 3 to 66 0 length_nm_x1000 500000 
+net 34 68 0 to 70 0 length_nm_x1000 750000 
+net 35 69 0 to 70 1 length_nm_x1000 500000 
+net 36 70 3 to 72 0 length_nm_x1000 500000 
+net 37 74 0 to 76 0 length_nm_x1000 750000 
+net 38 75 0 to 76 1 length_nm_x1000 500000 
+net 39 76 3 to 78 0 length_nm_x1000 500000 
+net 40 80 0 to 82 0 length_nm_x1000 750000 
+net 41 81 0 to 82 1 length_nm_x1000 500000 
+net 42 82 3 to 84 0 length_nm_x1000 500000 
+net 43 86 0 to 88 0 length_nm_x1000 750000 
+net 44 87 0 to 88 1 length_nm_x1000 500000 
+net 45 88 3 to 90 0 length_nm_x1000 500000 
+net 46 92 0 to 94 0 length_nm_x1000 750000 
+net 47 93 0 to 94 1 length_nm_x1000 500000 
+net 48 94 3 to 96 0 length_nm_x1000 500000 
+net 49 98 0 to 100 0 length_nm_x1000 750000 
+net 50 99 0 to 100 1 length_nm_x1000 500000 
+net 51 100 3 to 102 0 length_nm_x1000 500000 
+net 52 104 0 to 106 0 length_nm_x1000 750000 
+net 53 105 0 to 106 1 length_nm_x1000 500000 
+net 54 106 3 to 108 0 length_nm_x1000 500000 
+net 55 110 0 to 112 0 length_nm_x1000 750000 
+net 56 111 0 to 112 1 length_nm_x1000 500000 
+net 57 112 3 to 114 0 length_nm_x1000 500000 
+net 58 116 0 to 118 0 length_nm_x1000 750000 
+net 59 117 0 to 118 1 length_nm_x1000 500000 
+net 60 118 3 to 120 0 length_nm_x1000 500000 
+net 61 122 0 to 124 0 length_nm_x1000 750000 
+net 62 123 0 to 124 1 length_nm_x1000 500000 
+net 63 124 3 to 126 0 length_nm_x1000 500000 
+net 64 128 0 to 130 0 length_nm_x1000 750000 
+net 65 129 0 to 130 1 length_nm_x1000 500000 
+net 66 130 3 to 132 0 length_nm_x1000 500000 
+net 67 134 0 to 136 0 length_nm_x1000 750000 
+net 68 135 0 to 136 1 length_nm_x1000 500000 
+net 69 136 3 to 138 0 length_nm_x1000 500000 
+net 70 140 0 to 142 0 length_nm_x1000 750000 
+net 71 141 0 to 142 1 length_nm_x1000 500000 
+net 72 142 3 to 144 0 length_nm_x1000 500000 
+net 73 146 0 to 148 0 length_nm_x1000 750000 
+net 74 147 0 to 148 1 length_nm_x1000 500000 
+net 75 148 3 to 150 0 length_nm_x1000 500000 
+net 76 152 0 to 154 0 length_nm_x1000 750000 
+net 77 153 0 to 154 1 length_nm_x1000 500000 
+net 78 154 3 to 156 0 length_nm_x1000 500000 
+net 79 158 0 to 160 0 length_nm_x1000 750000 
+net 80 159 0 to 160 1 length_nm_x1000 500000 
+net 81 160 3 to 162 0 length_nm_x1000 500000 
+net 82 164 0 to 166 0 length_nm_x1000 750000 
+net 83 165 0 to 166 1 length_nm_x1000 500000 
+net 84 166 3 to 168 0 length_nm_x1000 500000 
+net 85 170 0 to 172 0 length_nm_x1000 750000 
+net 86 171 0 to 172 1 length_nm_x1000 500000 
+net 87 172 3 to 174 0 length_nm_x1000 500000 
+net 88 176 0 to 178 0 length_nm_x1000 750000 
+net 89 177 0 to 178 1 length_nm_x1000 500000 
+net 90 178 3 to 180 0 length_nm_x1000 500000 
+net 91 182 0 to 184 0 length_nm_x1000 750000 
+net 92 183 0 to 184 1 length_nm_x1000 500000 
+net 93 184 3 to 186 0 length_nm_x1000 500000 
+net 94 188 0 to 190 0 length_nm_x1000 750000 
+net 95 189 0 to 190 1 length_nm_x1000 500000 
+net 96 190 3 to 192 0 length_nm_x1000 500000 
+net 97 194 0 to 196 0 length_nm_x1000 750000 
+net 98 195 0 to 196 1 length_nm_x1000 500000 
+net 99 196 3 to 198 0 length_nm_x1000 500000 
+net 100 200 0 to 202 0 length_nm_x1000 750000 
+net 101 201 0 to 202 1 length_nm_x1000 500000 
+net 102 202 3 to 204 0 length_nm_x1000 500000 
+net 103 206 0 to 208 0 length_nm_x1000 750000 
+net 104 207 0 to 208 1 length_nm_x1000 500000 
+net 105 208 3 to 210 0 length_nm_x1000 500000 
+net 106 212 0 to 214 0 length_nm_x1000 750000 
+net 107 213 0 to 214 1 length_nm_x1000 500000 
+net 108 214 3 to 216 0 length_nm_x1000 500000 
+net 109 218 0 to 220 0 length_nm_x1000 750000 
+net 110 219 0 to 220 1 length_nm_x1000 500000 
+net 111 220 3 to 222 0 length_nm_x1000 500000 
+net 112 224 0 to 226 0 length_nm_x1000 750000 
+net 113 225 0 to 226 1 length_nm_x1000 500000 
+net 114 226 3 to 228 0 length_nm_x1000 500000 
+net 115 230 0 to 232 0 length_nm_x1000 750000 
+net 116 231 0 to 232 1 length_nm_x1000 500000 
+net 117 232 3 to 234 0 length_nm_x1000 500000 
+net 118 236 0 to 238 0 length_nm_x1000 750000 
+net 119 237 0 to 238 1 length_nm_x1000 500000 
+net 120 238 3 to 240 0 length_nm_x1000 500000 
+net 121 242 0 to 244 0 length_nm_x1000 750000 
+net 122 243 0 to 244 1 length_nm_x1000 500000 
+net 123 244 3 to 246 0 length_nm_x1000 500000 
+net 124 248 0 to 250 0 length_nm_x1000 750000 
+net 125 249 0 to 250 1 length_nm_x1000 500000 
+net 126 250 3 to 252 0 length_nm_x1000 500000 
+net 127 254 0 to 256 0 length_nm_x1000 750000 
+net 128 255 0 to 256 1 length_nm_x1000 500000 
+net 129 256 3 to 258 0 length_nm_x1000 500000 
+net 130 260 0 to 262 0 length_nm_x1000 750000 
+net 131 261 0 to 262 1 length_nm_x1000 500000 
+net 132 262 3 to 264 0 length_nm_x1000 500000 
+net 133 266 0 to 268 0 length_nm_x1000 750000 
+net 134 267 0 to 268 1 length_nm_x1000 500000 
+net 135 268 3 to 270 0 length_nm_x1000 500000 
+net 136 272 0 to 274 0 length_nm_x1000 750000 
+net 137 273 0 to 274 1 length_nm_x1000 500000 
+net 138 274 3 to 276 0 length_nm_x1000 500000 
+net 139 278 0 to 280 0 length_nm_x1000 750000 
+net 140 279 0 to 280 1 length_nm_x1000 500000 
+net 141 280 3 to 282 0 length_nm_x1000 500000 
+net 142 284 0 to 286 0 length_nm_x1000 750000 
+net 143 285 0 to 286 1 length_nm_x1000 500000 
+net 144 286 3 to 288 0 length_nm_x1000 500000 
+net 145 290 0 to 292 0 length_nm_x1000 750000 
+net 146 291 0 to 292 1 length_nm_x1000 500000 
+net 147 292 3 to 294 0 length_nm_x1000 500000 
+net 148 296 0 to 298 0 length_nm_x1000 750000 
+net 149 297 0 to 298 1 length_nm_x1000 500000 
+net 150 298 3 to 300 0 length_nm_x1000 500000 
+net 151 302 0 to 304 0 length_nm_x1000 750000 
+net 152 303 0 to 304 1 length_nm_x1000 500000 
+net 153 304 3 to 306 0 length_nm_x1000 500000 
+net 154 308 0 to 310 0 length_nm_x1000 750000 
+net 155 309 0 to 310 1 length_nm_x1000 500000 
+net 156 310 3 to 312 0 length_nm_x1000 500000 
+net 157 314 0 to 316 0 length_nm_x1000 750000 
+net 158 315 0 to 316 1 length_nm_x1000 500000 
+net 159 316 3 to 318 0 length_nm_x1000 500000 
+net 160 320 0 to 322 0 length_nm_x1000 750000 
+net 161 321 0 to 322 1 length_nm_x1000 500000 
+net 162 322 3 to 324 0 length_nm_x1000 500000 
+net 163 326 0 to 328 0 length_nm_x1000 750000 
+net 164 327 0 to 328 1 length_nm_x1000 500000 
+net 165 328 3 to 330 0 length_nm_x1000 500000 
+net 166 332 0 to 334 0 length_nm_x1000 750000 
+net 167 333 0 to 334 1 length_nm_x1000 500000 
+net 168 334 3 to 336 0 length_nm_x1000 500000 
+net 169 338 0 to 340 0 length_nm_x1000 750000 
+net 170 339 0 to 340 1 length_nm_x1000 500000 
+net 171 340 3 to 342 0 length_nm_x1000 500000 
+net 172 344 0 to 346 0 length_nm_x1000 750000 
+net 173 345 0 to 346 1 length_nm_x1000 500000 
+net 174 346 3 to 348 0 length_nm_x1000 500000 
+net 175 350 0 to 352 0 length_nm_x1000 750000 
+net 176 351 0 to 352 1 length_nm_x1000 500000 
+net 177 352 3 to 354 0 length_nm_x1000 500000 
+net 178 356 0 to 358 0 length_nm_x1000 750000 
+net 179 357 0 to 358 1 length_nm_x1000 500000 
+net 180 358 3 to 360 0 length_nm_x1000 500000 
+net 181 362 0 to 364 0 length_nm_x1000 750000 
+net 182 363 0 to 364 1 length_nm_x1000 500000 
+net 183 364 3 to 366 0 length_nm_x1000 500000 
+net 184 368 0 to 370 0 length_nm_x1000 750000 
+net 185 369 0 to 370 1 length_nm_x1000 500000 
+net 186 370 3 to 372 0 length_nm_x1000 500000 
+net 187 374 0 to 376 0 length_nm_x1000 750000 
+net 188 375 0 to 376 1 length_nm_x1000 500000 
+net 189 376 3 to 378 0 length_nm_x1000 500000 
+net 190 380 0 to 382 0 length_nm_x1000 750000 
+net 191 381 0 to 382 1 length_nm_x1000 500000 
+net 192 382 3 to 384 0 length_nm_x1000 500000 

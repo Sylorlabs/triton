@@ -1,0 +1,9 @@
+# Triton verification report v1
+verification_level = software-simulation
+fabricated_hardware = false
+laboratory_validated = false
+model_complete = true
+components = 384 
+guides = 192 
+derived_clock_mhz = 90000 
+clock_evidence = Illustrative

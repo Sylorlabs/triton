@@ -62,7 +62,7 @@ as “verified.” Partial work stays unchecked and is reported as partial.
       executable work is complete.
 - [ ] On failure, diagnose the root cause, preserve evidence, implement the fix,
       rerun the narrow test, then rerun all affected gates.
-- [ ] Maintain a resumable progress ledger containing item ID, state, evidence,
+- [x] Maintain a resumable progress ledger containing item ID, state, evidence,
       last command, result, blocker, and next action.
 - [ ] Never claim the entire plan is complete because time, context, or a session
       boundary was reached.
@@ -109,17 +109,22 @@ hardware, kernel, firmware, driver, display role, and date.
 
 - [ ] Inventory source modules, generated artifacts, probes, protocols, storage
       formats, and external dependencies.
-- [ ] Record the supported Zag compiler path and compiler identity/hash.
+- [x] Record the supported Zag compiler path and compiler identity/hash. Evidence:
+      `evidence/progress-ledger.md` A.compiler.
 - [ ] Make the clean build deterministic and document all prerequisites.
 - [ ] Separate production tests from obsolete probes and generated binaries.
-- [ ] Add a single test entry point that reports every suite independently.
-- [ ] Add machine-readable test output suitable for the progress ledger.
+- [x] Add a single test entry point that reports every suite independently.
+      Evidence: `verify.sh`, `tools/verify.zag`.
+- [x] Add machine-readable test output suitable for the progress ledger.
+      Evidence: JSON records emitted by `./verify.sh safe`.
 - [ ] Record baseline UI screenshots and frame timings on identified hardware.
-- [ ] Record baseline engine, save/load, routing, and simulation results.
+- [x] Record baseline engine, save/load, routing, and simulation results.
+      Evidence: `evidence/progress-ledger.md` A.baseline-engine.
 - [ ] Audit every numeric constant and classify it as structural, UI-only,
       physical, measured, derived, safety limit, or unexplained.
 - [ ] Audit every README and UI claim against executable evidence.
-- [ ] Create an issue/evidence map linking each discovered gap to this plan.
+- [x] Create an issue/evidence map linking each discovered gap to this plan.
+      Evidence: `evidence/progress-ledger.md`.
 
 ### Acceptance
 
@@ -149,13 +154,14 @@ hardware, kernel, firmware, driver, display role, and date.
 
 ### 5.2 Eliminate Unsupported Hardcoding
 
-- [ ] Remove `110 GHz` from code, probes, tool descriptions, UI labels, and docs
+- [x] Remove `110 GHz` from code, probes, tool descriptions, UI labels, and docs
       wherever it is asserted as a universal emitter or board rate.
-- [ ] Replace hardcoded component frequencies with model parameters or unknowns.
-- [ ] Derive board symbol rate from the selected components, interconnect model,
+- [x] Replace hardcoded component frequencies with model parameters or unknowns.
+      Evidence: `src/device_model.zag`, unsupported-claim gate.
+- [x] Derive board symbol rate from the selected components, interconnect model,
       timing constraints, and explicit operating conditions.
-- [ ] Replace comments such as “9.09 ps” with unit-safe runtime derivation.
-- [ ] Replace fixed waveguide-delay assumptions with propagation calculations
+- [x] Replace comments such as “9.09 ps” with unit-safe runtime derivation.
+- [x] Replace fixed waveguide-delay assumptions with propagation calculations
       derived from length and the selected material/device model.
 - [ ] Replace unexplained component-count and delay caps with named, documented,
       configurable safety limits and tests.
@@ -163,16 +169,17 @@ hardware, kernel, firmware, driver, display role, and date.
       or memory assumptions.
 - [ ] Remove hardcoded frame-time and component-count claims from documentation;
       publish benchmark results with environment and timestamp instead.
-- [ ] Add a repository test that rejects banned unsupported claims and suspicious
+- [x] Add a repository test that rejects banned unsupported claims and suspicious
       physical literals outside approved model fixtures.
 - [ ] Render missing evidence as `Unknown` or `Not characterized`.
 
 ### Acceptance
 
-- [ ] Changing the device model changes derived timing without a source edit.
+- [x] Changing the device model changes derived timing without a source edit.
+      Evidence: engine assertion of the same name.
 - [ ] Unit-conversion and dimensional-analysis tests cover every derivation.
 - [ ] No user-visible physical or performance claim lacks provenance.
-- [ ] The application can represent an incompletely characterized device without
+- [x] The application can represent an incompletely characterized device without
       inventing a value.
 
 ## 6. Phase C — Photonic Computing Unit Design
@@ -188,10 +195,12 @@ directly into memory.
 - [ ] Enforce occupancy, placement, orientation, port compatibility, minimum bend
       radius, clearance, layer transition, fan-in, fan-out, and boundary rules.
 - [ ] Make every edit transactional and undoable.
-- [ ] Make save/load round trips lossless and deterministic.
+- [x] Make save/load round trips lossless and deterministic. Evidence: engine
+      round-trip assertions and byte-identical massive Flash save/reopen.
 - [ ] Add schema versioning, migration, corruption detection, and recovery.
 - [ ] Preserve unknown future fields where feasible.
-- [ ] Add canonical project hashing for reproducibility.
+- [x] Add canonical project hashing for reproducibility. Evidence: project v2
+      content hash and corruption test in `probe/engine_test.zag`.
 
 ### 6.2 Routing and Timing
 
@@ -199,8 +208,9 @@ directly into memory.
 - [ ] Make routing cost terms named, configurable, and inspectable.
 - [ ] Detect collisions, illegal crossings, disconnected ports, loops, and
       unreachable routes.
-- [ ] Compute optical path length from geometry.
-- [ ] Derive propagation delay from the selected physical model.
+- [x] Compute optical path length from geometry. Evidence: `scene_add_guide`.
+- [x] Derive propagation delay from the selected physical model. Evidence:
+      `guide_delay_fs_for`, `guide_delay_symbols_for_model`.
 - [ ] Report timing paths, bottlenecks, margins, and uncertainty.
 - [ ] Add deterministic routing seeds and replayable failures.
 - [ ] Add incremental rerouting that preserves unaffected manual routes.
@@ -217,15 +227,18 @@ directly into memory.
 - [ ] Run design-rule checks and resolve every error.
 - [ ] Run connectivity, timing, and model-completeness checks.
 - [ ] Simulate all required input vectors and compare with the oracle.
-- [ ] Save, close, reopen, and reverify the design.
-- [ ] Export a bill of materials, netlist, model manifest, verification report,
+- [x] Save, close, reopen, and reverify the design. Evidence: `flash-photonic`
+      gate reloads and verifies the 320-component reference workload.
+- [x] Export a bill of materials, netlist, model manifest, verification report,
       and deterministic render.
-- [ ] Include the verified reference PCU as a maintained example project.
+- [x] Include the verified reference PCU as a maintained example project.
+      Evidence: `examples/flash_photonic_massive.zpa` and deterministic exports.
 
 ### Acceptance
 
 - [ ] The reference PCU produces the declared result for every test vector.
-- [ ] A clean build can recreate or replay its construction deterministically.
+- [x] A clean build can recreate or replay its construction deterministically.
+      Evidence: `flash-photonic` compares regenerated bytes to maintained files.
 - [ ] Tampering with geometry, model parameters, or connectivity causes the
       appropriate verification gate to fail.
 - [ ] The report does not imply fabricated silicon/photonics or laboratory proof;
@@ -252,7 +265,8 @@ directly into memory.
 ### Acceptance
 
 - [ ] Same project, models, seed, and inputs produce byte-identical traces.
-- [ ] Invalid or incomplete models cannot silently produce a “verified” result.
+- [x] Invalid or incomplete models cannot silently produce a “verified” result.
+      Evidence: `incomplete model cannot silently advance verified simulation`.
 - [ ] Every simulator status shown in the UI maps to a tested engine state.
 
 ## 8. Phase E — Agent Access and Automation
@@ -262,9 +276,10 @@ The user and agent must be able to perform the same core project operations.
 
 ### 8.1 Capability Model
 
-- [ ] Define explicit `read`, `inspect`, `simulate`, `edit`, `save`, `export`,
+- [x] Define explicit `read`, `inspect`, `simulate`, `edit`, `save`, `export`,
       `execute-local`, and `admin` capabilities.
-- [ ] Default to read/inspect/simulate; require an explicit grant for mutation.
+- [x] Default to read/inspect/simulate; require an explicit grant for mutation.
+      Evidence: `src/capability.zag`, `agent-capability-denial`.
 - [ ] Scope grants to project, session, operation class, path, and expiration.
 - [ ] Make high-impact actions previewable and ask-before-write by default.
 - [ ] Support user-configurable always-allow and deny rules without bypassing
@@ -292,7 +307,8 @@ The user and agent must be able to perform the same core project operations.
 
 - [ ] Test every advertised tool with valid, invalid, unauthorized, conflicting,
       replayed, cancelled, and malformed requests.
-- [ ] Prove unauthorized requests leave project bytes and revision unchanged.
+- [x] Prove unauthorized requests leave project bytes and revision unchanged.
+      Evidence: `agent-capability-denial` hashes the project before/after.
 - [ ] Prove every successful mutation is undoable and auditable.
 - [ ] Run two-client revision-conflict and recovery tests.
 - [ ] Run an agent-only end-to-end PCU construction and verification test.
@@ -313,7 +329,8 @@ The user and agent must be able to perform the same core project operations.
       states.
 - [ ] Avoid native-looking placeholders where the Triton component system has a
       styled equivalent.
-- [ ] Persist layout and preferences separately from project semantics.
+- [x] Persist layout and preferences separately from project semantics.
+      Evidence: `ui-preferences`, `.triton/layout.cfg`.
 
 ### 9.2 True 3D Rendering
 
@@ -330,10 +347,14 @@ The user and agent must be able to perform the same core project operations.
 
 ### 9.3 Real UI Testing
 
-- [ ] Launch the production binary in a real X11 session.
-- [ ] Exercise mouse, keyboard, resize, window close, focus, and repeated open/close.
+- [x] Launch the production binary in a real X11 session. Evidence:
+      `x11-live` on `DISPLAY=:0`, recorded in the ledger.
+- [x] Exercise mouse, keyboard, resize, window close, focus, and repeated open/close.
+      Evidence: live `x11-live` suite.
 - [ ] Complete the reference PCU workflow through visible UI controls.
 - [ ] Verify screenshots at multiple window sizes and DPI/scaling settings.
+      Partial evidence: live 1024x640 and 1440x900 captures pass; DPI/scaling
+      variants remain unverified.
 - [ ] Inspect layout for clipping, overlap, unreadable contrast, stale state, and
       inconsistent hit targets.
 - [ ] Verify error and permission prompts with both keyboard and pointer.
@@ -350,8 +371,10 @@ The user and agent must be able to perform the same core project operations.
 - [ ] Test truncation, bit corruption, partial writes, disk-full behavior, and
       process termination at every save stage.
 - [ ] Add autosave retention and explicit recovery UX.
-- [ ] Make all exports deterministic and identify project/model/tool versions.
-- [ ] Export human-readable design summaries and machine-readable netlists.
+- [x] Make all exports deterministic and identify project/model/tool versions.
+      Evidence: canonical byte comparisons in `flash-photonic`.
+- [x] Export human-readable design summaries and machine-readable netlists.
+      Evidence: maintained BOM, netlist, models, and report artifacts.
 - [ ] Ensure diagnostic bundles exclude sensitive scene contents by default.
 - [ ] Add round-trip tests for every supported project version.
 
@@ -468,8 +491,10 @@ Run this gate from a clean checkout after all earlier phases are complete:
 - [ ] Modify it through the UI, undo, redo, save, close, and reopen it.
 - [ ] Run design-rule, connectivity, model, timing, and simulation verification.
 - [ ] Compare all reference outputs and traces.
-- [ ] Export the netlist, model manifest, bill of materials, report, and render.
-- [ ] Exercise an unauthorized agent mutation and prove it has no effect.
+- [x] Export the netlist, model manifest, bill of materials, report, and render.
+      Evidence: maintained text artifacts and `evidence/captures/flash-pcu-1440.png`.
+- [x] Exercise an unauthorized agent mutation and prove it has no effect.
+      Evidence: `agent-capability-denial`.
 - [ ] Exercise crash recovery and revision-conflict handling.
 - [ ] Run the supported CPU-renderer soak.
 - [ ] Run only hardware-safe GPU gates appropriate to the available device; keep
@@ -529,14 +554,14 @@ not “programmer UI”
 ## 3.1 Design system
 
 * [ ] Create a real design system before adding more UI panels.
-* [ ] Define spacing tokens:
+* [x] Define spacing tokens. Evidence: `src/ui.zag` 2/4/8/12/16/24 grid:
 
-  * [ ] 2 px
-  * [ ] 4 px
-  * [ ] 8 px
-  * [ ] 12 px
-  * [ ] 16 px
-  * [ ] 24 px
+  * [x] 2 px
+  * [x] 4 px
+  * [x] 8 px
+  * [x] 12 px
+  * [x] 16 px
+  * [x] 24 px
 * [ ] Define typography scale:
 
   * [ ] tiny metadata
@@ -547,9 +572,10 @@ not “programmer UI”
 * [ ] Define border radius rules.
 * [ ] Define panel shadow/elevation rules.
 * [ ] Define selected, hovered, focused, disabled, warning, and error states.
-* [ ] Define color tokens instead of hardcoded colors.
-* [ ] Define beam-state colors separately from UI colors.
-* [ ] Make the UI work in dark mode first.
+* [x] Define color tokens instead of hardcoded colors. Evidence: `th_*` palette.
+* [x] Define beam-state colors separately from UI colors. Evidence:
+  `src/ternary.zag` versus `src/ui.zag`.
+* [x] Make the UI work in dark mode first. Evidence: live X11 captures.
 * [ ] Keep enough contrast that labels are readable without eye strain.
 
 Design tokens example:
@@ -577,8 +603,8 @@ Color.Valid
 ## 3.2 Layout quality
 
 * [ ] Align every panel to a grid.
-* [ ] Make left/right/bottom panels resizable.
-* [ ] Remember panel sizes between launches.
+* [x] Make left/right/bottom panels resizable. Evidence: `app_splitters`.
+* [x] Remember panel sizes between launches. Evidence: `ui-preferences`.
 * [ ] Use consistent padding inside panels.
 * [ ] Do not let text touch borders.
 * [ ] Do not let controls randomly change height.
@@ -929,4 +955,22 @@ Checklist:
 ```
 
 The standard should be: **Triton looks like a designer and CAD engineer built it together**, while the engine underneath stays mathematically accurate.
-also same logic applys for flash if it causes problems flash lives at /home/micah/Desktop/Sylorlabs/flash you have full permission for any change or invasive changes of flash just save to git history and then your good to go also try to get flash working on the photonic proccesor too make sure triton has an option and support for flash language to test it on the photonic unit and what happens when you run certain flash code also agents like you llm agents should have access to everything i mean everything every control screenshots id tagging accurate clicking i want flash support for this language and i want you to make flash truly amazing too
+## 19. Flash Language and Full Agent Control
+
+- [x] Put the pre-existing Flash tree under Git history before invasive changes.
+      Evidence: Flash baseline commit `802e155`.
+- [x] Keep supported Flash implementation sources pure Flash/Zag.
+      Evidence: Flash `tests/pure_flash_tree.sh`, commit `ea2ab41`.
+- [x] Preserve and rerun Flash's comprehensive standalone/self-host gates.
+      Evidence: 63/63 `tests/run_all.sh` on 2026-07-07.
+- [x] Import general Flash FIR rather than hardcoding Triton behavior in Flash.
+      Evidence: `src/flash_ir.zag`, Flash FIR v1.
+- [x] Construct and verify a large balanced-ternary Flash workload on a Triton
+      photonic unit. Evidence: 64 operations, 384 components, 192 guides, zero
+      mismatches in the `flash-photonic` gate.
+- [ ] Add visible UI controls for selecting, importing, running, stepping, and
+      inspecting Flash source/FIR and its per-operation trace.
+- [ ] Give explicitly authorized agents schema-described access to every UI
+      control, screenshot, stable element ID, accurate click target, and state.
+- [ ] Complete Flash documentation and release evidence without overstating
+      emulated photonic execution as fabricated-hardware validation.

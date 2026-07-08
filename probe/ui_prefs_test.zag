@@ -1,0 +1,16 @@
+@import("../std/list.zag") as list
+@import("../std/hashmap.zag") as hm
+@import("../src/app.zag")
+
+fn main() i32 {
+    let a: *App = app_new(1600, 1000);
+    a.*.left_w = 218; a.*.right_w = 301; a.*.bottom_h = 231;
+    if (!app_layout_save(a)) { _zag_println("UI PREFS: save failed"); return 1; }
+    let b: *App = app_new(1600, 1000);
+    app_layout_load(b);
+    if (b.*.left_w != 218 || b.*.right_w != 301 || b.*.bottom_h != 231) {
+        _zag_println("UI PREFS: roundtrip mismatch"); return 1;
+    }
+    _zag_println("UI PREFS: ALL PASS");
+    return 0;
+}

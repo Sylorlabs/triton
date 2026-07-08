@@ -49,6 +49,9 @@ case "$cmd" in
     render)
         exec "$ZAGPA" --agent --once "render $1"
         ;;
+    export)
+        exec "$ZAGPA" --agent --once "export $1"
+        ;;
     sim)
         if [ "$1" = "step" ]; then
             exec "$ZAGPA" --agent --once "sim step ${2:-1}"
