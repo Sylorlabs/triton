@@ -3,7 +3,7 @@
     "triton": {
       "command": "/home/micah/Desktop/Sylorlabs/triton/zagpa",
       "args": ["--mcp"],
-      "env": { "TRITON_SESSION": "/home/micah/Desktop/Sylorlabs/triton/.triton/live.zpa" },
+      "env": { "TRITON_SESSION": "/home/micah/Desktop/Sylorlabs/triton/.triton/live.zpa", "TRITON_CAPS": "all", "TRITON_ACTOR": "configured-mcp" },
       "cwd": "/home/micah/Desktop/Sylorlabs/triton"
     }
   }

@@ -277,7 +277,7 @@ fn session_write_mcp_config(root: []u8) void {
     let p1: []u8 = _zag_str_concat("{\n  \"mcpServers\": {\n    \"triton\": {\n      \"command\": \"", zagpa);
     let p2: []u8 = _zag_str_concat(p1, "\",\n      \"args\": [\"--mcp\"],\n      \"env\": { \"TRITON_SESSION\": \"");
     let p3: []u8 = _zag_str_concat(p2, zpa);
-    let p4: []u8 = _zag_str_concat(p3, "\" },\n      \"cwd\": \"");
+    let p4: []u8 = _zag_str_concat(p3, "\", \"TRITON_CAPS\": \"all\", \"TRITON_ACTOR\": \"configured-mcp\" },\n      \"cwd\": \"");
     let p5: []u8 = _zag_str_concat(p4, root);
     let full: []u8 = _zag_str_concat(p5, "\"\n    }\n  }\n}\n");
     _zag_write_file("mcp-config.json", full);

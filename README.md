@@ -29,6 +29,12 @@ No C compiler, libc, Xlib, Mesa, LLVM, or Python service is used by Triton.
 ./zagctl flash import ../flash/examples/photonic_massive.fir
 ```
 
+Native agents default to `read,inspect,simulate`. Mutation, save, export, local
+execution, and admin operations require an explicit `TRITON_CAPS` grant. The
+generated local MCP configuration grants `all` deliberately and identifies its
+actor; deployments should narrow that value. Requests and denials are appended
+to `.triton/audit.log` (or `TRITON_AUDIT`).
+
 Set `ZNC=/absolute/path/to/znc` to override the default
 `../zag/zag-poc/znc`. The current environment and exact compiler hash used for
 release evidence are recorded in `evidence/progress-ledger.md`.

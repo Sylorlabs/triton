@@ -23,6 +23,10 @@ is the only GPU and drives the display.
 | C.massive-flash-pcu | pass | `../flash/examples/photonic_massive.flash`; `flash-photonic` gate | 64 ops became 320 components and 192 routed guides; zero detector mismatches | Export full maintained artifact set |
 | D.flash-ternary-ops | pass | chamber lattice ops 2/3/5/7; constant-trit emitters | Flash neg/add/mul/nand semantics verified after physical pipeline latency | Add exhaustive truth-table property test |
 | G.flash-roundtrip | pass | `/tmp/triton_massive.zpa`, save/reopen verify | 23,993-byte project hashes matched before and after reopen | Move canonical artifact into examples |
+| G.atomic-save | pass | `atomic_write_file`; engine failure injection | temp write, file fsync, close, rename; failed rename retained destination and removed temp | Add parent-directory fsync and crash-stage matrix |
+| G.corruption | pass | project v2 checksum; `corrupt project checksum rejected` | Modified project byte rejected before scene mutation | Add recovery journal UX |
+| E.capability-default | pass | `src/capability.zag`; `agent-capability-denial` | default read/inspect/simulate; unauthorized placement leaves project hash unchanged | Add scoped/expiring grants |
+| E.audit-log | partial | append-only request/denial records with actor and required capability | command results/affected IDs/undo tokens not yet recorded | Complete mutation result records |
 | F.x11-live-baseline | pass | `./verify.sh safe`; `--x11-selftest` on `DISPLAY=:0` | Motion, modifier, key, button, WM_DELETE, and PutImage round trip passed | Add resize/focus/reopen coverage |
 | F.x11-interleaving | pass | `X11.synth_seen`; live selftest | Synthetic proof no longer flakes when real pointer events interleave | Add resize/focus synthetic cases |
 | I.render-discovery | pass | `gpu_open`; `--gpu-info` | Scans DRM render minors and accepts only a successful AMDGPU info query; found minor 128 | Query full firmware/IP/memory tuple |

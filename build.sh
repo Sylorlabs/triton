@@ -16,7 +16,7 @@ mv -f zagpa.new zagpa
 ./zagpa --mcp-install "$(pwd)"
 
 echo "== agent multi-place + route regression =="
-./zagpa --agent examples/agent_demo.tcmd >/dev/null
+TRITON_CAPS=all ./zagpa --agent examples/agent_demo.tcmd >/dev/null
 
 echo "== engine tests =="
 rm -f probe/engine_test.new
@@ -75,6 +75,6 @@ else
 fi
 
 echo "== agent smoke =="
-printf 'ping\ndemo\nlist\nquit\n' | ./zagpa --agent >/dev/null
+printf 'ping\ndemo\nlist\nquit\n' | TRITON_CAPS=all ./zagpa --agent >/dev/null
 
 echo "build ok. run:  ./run.sh   agent:  ./zagpa --agent   mcp:  ./zagpa --mcp"

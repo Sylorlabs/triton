@@ -1,0 +1,73 @@
+// capability.zag — explicit local-agent grants and append-only request audit.
+
+@import("../std/list.zag") as list
+@import("../std/rt.zag")
+
+fn cap_read() i64 { return 1; }
+fn cap_inspect() i64 { return 2; }
+fn cap_simulate() i64 { return 4; }
+fn cap_edit() i64 { return 8; }
+fn cap_save() i64 { return 16; }
+fn cap_export() i64 { return 32; }
+fn cap_execute() i64 { return 64; }
+fn cap_admin() i64 { return 128; }
+
+fn cap_contains(hay: []u8, needle: []u8) bool {
+    if (needle.len < 1 || hay.len < needle.len) { return false; }
+    let i: i32 = 0;
+    while (i <= hay.len - needle.len) {
+        let ok: bool = true;
+        let j: i32 = 0;
+        while (j < needle.len) { if (hay[i + j] != needle[j]) { ok = false; } j = j + 1; }
+        if (ok) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn cap_load() i64 {
+    let raw: []u8 = _zag_getenv("TRITON_CAPS");
+    if (_zag_strcmp(raw, "all") == 1) { return 255; }
+    if (raw.len == 0) { return cap_read() | cap_inspect() | cap_simulate(); }
+    let bits: i64 = 0;
+    if (cap_contains(raw, "read")) { bits = bits | cap_read(); }
+    if (cap_contains(raw, "inspect")) { bits = bits | cap_inspect(); }
+    if (cap_contains(raw, "simulate")) { bits = bits | cap_simulate(); }
+    if (cap_contains(raw, "edit")) { bits = bits | cap_edit(); }
+    if (cap_contains(raw, "save")) { bits = bits | cap_save(); }
+    if (cap_contains(raw, "export")) { bits = bits | cap_export(); }
+    if (cap_contains(raw, "execute-local")) { bits = bits | cap_execute(); }
+    if (cap_contains(raw, "admin")) { bits = bits | cap_admin(); }
+    return bits;
+}
+
+fn cap_allowed(required: i64) bool { return (cap_load() & required) == required; }
+
+fn audit_cpath(path: []u8) list.ArrayList[u8] {
+    let b: list.ArrayList[u8] = list.make[u8](path.len + 1);
+    let i: i32 = 0;
+    while (i < path.len) { list.push[u8](&b, path[i]); i = i + 1; }
+    list.push[u8](&b, 0);
+    return b;
+}
+
+fn audit_append(state: []u8, line: []u8, required: i64) void {
+    let path: []u8 = _zag_getenv("TRITON_AUDIT");
+    if (path.len == 0) { path = ".triton/audit.log"; }
+    let actor: []u8 = _zag_getenv("TRITON_ACTOR");
+    if (actor.len == 0) { actor = "local-agent"; }
+    let a: []u8 = _zag_str_concat("actor=", actor);
+    let b: []u8 = _zag_str_concat(a, " state=");
+    let c: []u8 = _zag_str_concat(b, state);
+    let d: []u8 = _zag_str_concat(c, " required=");
+    let e: []u8 = _zag_str_concat(d, _zag_i64_to_str(required));
+    let f: []u8 = _zag_str_concat(e, " request=");
+    let record: []u8 = _zag_str_concat(_zag_str_concat(f, line), "\n");
+    let cp: list.ArrayList[u8] = audit_cpath(path);
+    let fd: i64 = _zag_raw_syscall(2, cp.data as i64, 1089, 420, 0, 0, 0);
+    if (fd >= 0) {
+        let _w: i64 = _zag_raw_syscall(1, fd, _zag_slice_ptr(record) as i64, record.len as i64, 0, 0, 0);
+        let _c: i64 = _zag_raw_syscall(3, fd, 0, 0, 0, 0, 0);
+    }
+    list.free[u8](&cp);
+}

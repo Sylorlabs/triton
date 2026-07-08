@@ -263,6 +263,17 @@ fn main() i32 {
     check("roundtrip: Flash chamber operation preserved",
         s3.*.comps.data[scene_comp_index(s3, ch)].logic_op == 5, &fails);
     s.*.comps.data[logic_ci].logic_op = 0;
+    let corrupt: []u8 = _zag_read_file("/tmp/triton_engine_logic.zpa");
+    if (corrupt.len > 12) { corrupt[10] = corrupt[10] ^ 1; }
+    _zag_write_file("/tmp/triton_engine_corrupt.zpa", corrupt);
+    let s_bad: *Scene = scene_new();
+    check("corrupt project checksum rejected", !design_load(s_bad, "/tmp/triton_engine_corrupt.zpa"), &fails);
+    let atomic_dir: list.ArrayList[u8] = io_cpath("/tmp/triton_atomic_target");
+    let _mk_atomic_dir: i64 = _zag_raw_syscall(83, atomic_dir.data as i64, 493, 0, 0, 0, 0);
+    list.free[u8](&atomic_dir);
+    check("failed atomic rename reports failure", !design_save(s, "/tmp/triton_atomic_target"), &fails);
+    check("failed atomic save removes temporary file",
+        _zag_file_exists("/tmp/triton_atomic_target.tmp") == 0, &fails);
 
     // ── journal persistence ──
     let jj: Journal = journal_new();

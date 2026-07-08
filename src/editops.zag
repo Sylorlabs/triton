@@ -436,6 +436,49 @@ fn parse_line_ints(line: []u8, from: i32, out: *list.ArrayList[i64], stop: *i32)
 
 // ── .jrn undo/redo persistence (shared by GUI + agent via live session) ───────
 
+fn io_cpath(path: []u8) list.ArrayList[u8] {
+    let out: list.ArrayList[u8] = list.make[u8](path.len + 1);
+    let i: i32 = 0;
+    while (i < path.len) { list.push[u8](&out, path[i]); i = i + 1; }
+    list.push[u8](&out, 0);
+    return out;
+}
+
+// Atomic durable replacement: write a sibling temporary file, fsync its bytes,
+// close it, then rename over the destination. A failed stage leaves the prior
+// destination untouched and removes the temporary file.
+fn atomic_write_file(path: []u8, bytes: []u8) bool {
+    let tmp: []u8 = _zag_str_concat(path, ".tmp");
+    let cp: list.ArrayList[u8] = io_cpath(path);
+    let ct: list.ArrayList[u8] = io_cpath(tmp);
+    let fd: i64 = _zag_raw_syscall(2, ct.data as i64, 577, 420, 0, 0, 0);
+    if (fd < 0) { list.free[u8](&cp); list.free[u8](&ct); return false; }
+    let off: i64 = 0;
+    let ok: bool = true;
+    while (off < bytes.len as i64 && ok) {
+        let n: i64 = _zag_raw_syscall(1, fd,
+            (_zag_slice_ptr(bytes) as i64) + off, (bytes.len as i64) - off, 0, 0, 0);
+        if (n <= 0) { ok = false; } else { off = off + n; }
+    }
+    if (ok && _zag_raw_syscall(74, fd, 0, 0, 0, 0, 0) != 0) { ok = false; }
+    if (_zag_raw_syscall(3, fd, 0, 0, 0, 0, 0) != 0) { ok = false; }
+    if (ok && _zag_raw_syscall(82, ct.data as i64, cp.data as i64, 0, 0, 0, 0) != 0) { ok = false; }
+    if (!ok) { let _u: i64 = _zag_raw_syscall(87, ct.data as i64, 0, 0, 0, 0, 0); }
+    list.free[u8](&cp);
+    list.free[u8](&ct);
+    return ok;
+}
+
+fn design_bytes_hash(bytes: []u8) i64 {
+    let h: i64 = 146959810;
+    let i: i32 = 0;
+    while (i < bytes.len) {
+        h = ((h * 16777619) ^ (bytes[i] as i64)) & 2147483647;
+        i = i + 1;
+    }
+    return h;
+}
+
 fn jrn_ser_comp_fields(out: *list.ArrayList[u8], c: Comp) void {
     ser_int(out, c.id as i64);
     ser_int(out, kind_index(c.kind) as i64);
@@ -543,9 +586,9 @@ fn journal_save(j: *Journal, path: []u8) bool {
         ri = ri + 1;
     }
     let bytes: []u8 = out.data[0..out.len];
-    let rc: i32 = _zag_write_file(path, bytes);
+    let ok: bool = atomic_write_file(path, bytes);
     list.free[u8](&out);
-    return rc == 0;
+    return ok;
 }
 
 fn jrn_comp_from(nums: list.ArrayList[i64], name_: []u8) Comp {
@@ -788,10 +831,14 @@ fn design_save(s: *Scene, path: []u8) bool {
         ser_text(&out, "\n");
         gi = gi + 1;
     }
+    let content_hash: i64 = design_bytes_hash(out.data[0..out.len]);
+    ser_text(&out, "h ");
+    ser_int(&out, content_hash);
+    ser_text(&out, "\n");
     let bytes: []u8 = out.data[0..out.len];
-    let rc: i32 = _zag_write_file(path, bytes);
+    let ok: bool = atomic_write_file(path, bytes);
     list.free[u8](&out);
-    return rc == 0;
+    return ok;
 }
 
 fn design_load(s: *Scene, path: []u8) bool {
@@ -801,6 +848,20 @@ fn design_load(s: *Scene, path: []u8) bool {
     let v1: bool = _zag_strcmp(raw[0..5], "zpa 1") == 1;
     let v2: bool = _zag_strcmp(raw[0..5], "zpa 2") == 1;
     if (!v1 && !v2) { return false; }
+    if (v2) {
+        let hpos: i32 = 0 - 1;
+        let scan: i32 = 0;
+        while (scan + 3 < raw.len) {
+            if ((scan == 0 || (raw[scan - 1] as i32) == 10) &&
+                (raw[scan] as i32) == 'h' && (raw[scan + 1] as i32) == 32) { hpos = scan; }
+            scan = scan + 1;
+        }
+        if (hpos < 0) { return false; }
+        let hend: i32 = hpos + 2;
+        while (hend < raw.len && (raw[hend] as i32) != 10) { hend = hend + 1; }
+        let expected: i64 = _zag_str_to_i64(raw[hpos + 2..hend]);
+        if (design_bytes_hash(raw[0..hpos]) != expected) { return false; }
+    }
     scene_clear(s);
 
     let nums: list.ArrayList[i64] = list.make[i64](32);
