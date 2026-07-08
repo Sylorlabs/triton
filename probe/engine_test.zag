@@ -110,6 +110,22 @@ fn main() i32 {
     // (delays are quantized from real propagation time against the derived
     // clock; read them back from the compiled fabric)
     check("clock derived from placed parts", sim.*.clock_ghz > 0.0, &fails);
+    let original_clock: f64 = sim.*.clock_ghz;
+    s.*.model.emitter_rate_ghz.value = original_clock / 2.0;
+    sim_recompile(sim, s);
+    check("changing device model changes derived timing without source edit",
+        sim.*.clock_ghz == original_clock / 2.0, &fails);
+    s.*.model.emitter_rate_ghz.value = original_clock;
+    sim_recompile(sim, s);
+    check("complete illustrative model permits simulation", sim.*.model_ok, &fails);
+    s.*.model.group_index.known = false;
+    sim_recompile(sim, s);
+    let blocked_symbol: i64 = sim.*.symbol;
+    sim_step(sim, s);
+    check("incomplete model cannot silently advance verified simulation",
+        !sim.*.model_ok && sim.*.symbol == blocked_symbol, &fails);
+    s.*.model.group_index.known = true;
+    sim_recompile(sim, s);
     let d_in: i32 = sim.*.sguides.data[0].delay;
     let d_out: i32 = sim.*.sguides.data[2].delay;
     let lat: i32 = d_in + d_out;
@@ -235,6 +251,10 @@ fn main() i32 {
         scene_cell_owner(s2, s.*.comps.data[0].origin) == s.*.comps.data[0].id, &fails);
     check("roundtrip: placement still enforced",
         scene_can_place(s2, Kind.Chamber, vox(3, 1, 3), 0) == 1, &fails);
+    check("roundtrip: device model version pinned", s2.*.model.schema_version == 1, &fails);
+    check("roundtrip: physical model values preserved",
+        s2.*.model.pitch_nm.value == s.*.model.pitch_nm.value &&
+        s2.*.model.emitter_rate_ghz.value == s.*.model.emitter_rate_ghz.value, &fails);
 
     // ── journal persistence ──
     let jj: Journal = journal_new();

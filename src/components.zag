@@ -2,19 +2,20 @@
 // Footprints, optical ports, and placement rules on the 250 nm voxel lattice.
 
 @import("voxel.zag")
+@import("device_model.zag")
 
-fn pitch_nm() f64 { return 250.0; }
+fn pitch_nm() f64 { return model_reference_illustrative().pitch_nm.value; }
 
 // ── platform physics (material data, not tunables) ───────────────────────────
 // Vacuum light speed in nm/ps; the GeSn-clad guide's group index slows the
 // carrier to c/n_g. Every delay and phase in the simulator derives from these
 // two numbers plus routed geometry — timing is never asserted by fiat.
 fn light_speed_nm_ps() f64 { return 299792.458; }
-fn group_index() f64 { return 2.1; }
+fn group_index() f64 { return model_reference_illustrative().group_index.value; }
 
 // Chamber cavity resonance: the wavelength a chamber re-emits at (its output
 // carrier), distinct from the emitters' WDM comb channels.
-fn chamber_resonance_nm() f64 { return 1550.0; }
+fn chamber_resonance_nm() f64 { return model_reference_illustrative().chamber_resonance_nm.value; }
 
 enum Kind {
     Plate,     // GeSn base plate: substrate waffle grid, 8x8 lattice cells
@@ -31,13 +32,14 @@ enum Kind {
 // clock constraint. The board's symbol clock is the MIN across everything
 // placed: put a slow part down and the whole fabric retimes around it.
 fn kind_rate_ghz(k: Kind) f64 {
-    return switch (k) {
-        .Plate => 0.0,
-        .Chamber => 180.0,
-        .Soh => 0.0,
-        .Emitter => 110.0,
-        .Detector => 140.0,
-    };
+    return model_kind_rate_ghz(model_reference_illustrative(), k);
+}
+
+fn model_kind_rate_ghz(m: DeviceModel, k: Kind) f64 {
+    if (k == Kind.Chamber && m.chamber_rate_ghz.known) { return m.chamber_rate_ghz.value; }
+    if (k == Kind.Emitter && m.emitter_rate_ghz.known) { return m.emitter_rate_ghz.value; }
+    if (k == Kind.Detector && m.detector_rate_ghz.known) { return m.detector_rate_ghz.value; }
+    return 0.0;
 }
 
 fn kind_count() i32 { return 5; }
@@ -85,7 +87,7 @@ fn kind_blurb(k: Kind) []u8 {
         .Plate => "Substrate waffle grid, 8x8 cells",
         .Chamber => "Interference cavity, 3-in 1-out",
         .Soh => "Crystal memory plane, integrates",
-        .Emitter => "Ternary phase source, 110 GHz",
+        .Emitter => "Ternary phase source, model-derived rate",
         .Detector => "Monolayer phase readout",
     };
 }

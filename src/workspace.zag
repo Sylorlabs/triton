@@ -360,7 +360,11 @@ fn draw_toolbar(a: *App) void {
             let pos7: []u8 = _zag_str_concat(pos6, fmt_i((c.rot * 90) as i64));
             draw_text(f, x, y, pos7, th_text_dim());
             y = y + 14;
-            draw_text(f, x, y, "pitch 250 nm", th_text_dim());
+            let pitch: []u8 = "pitch Unknown";
+            if (a.*.scene.*.model.pitch_nm.known) {
+                pitch = _zag_str_concat(_zag_str_concat("pitch ", fmt_i(a.*.scene.*.model.pitch_nm.value as i64)), " nm (Illustrative)");
+            }
+            draw_text(f, x, y, pitch, th_text_dim());
             y = y + 14;
 
             if (c.kind == Kind.Emitter) {
@@ -410,10 +414,10 @@ fn draw_toolbar(a: *App) void {
             let ln2: []u8 = _zag_str_concat(ln, " nm");
             draw_text(f, x, y, ln2, th_text());
             y = y + 14;
-            let fs: []u8 = _zag_str_concat("delay ", fmt_i(guide_delay_fs(g.length_nm) as i64));
+            let fs: []u8 = _zag_str_concat("delay ", fmt_i(guide_delay_fs_for(a.*.scene, g.length_nm) as i64));
             let fs2: []u8 = _zag_str_concat(fs, " fs / ");
             let fs3: []u8 = _zag_str_concat(fs2,
-                fmt_i(guide_delay_symbols_for(a.*.sim.*.clock_ghz, g.length_nm) as i64));
+                fmt_i(guide_delay_symbols_for_model(a.*.scene, a.*.sim.*.clock_ghz, g.length_nm) as i64));
             let fs4: []u8 = _zag_str_concat(fs3, " symbols");
             draw_text(f, x, y, fs4, th_text_dim());
             y = y + 14;

@@ -1,5 +1,5 @@
 // sim.zag — wave-state simulation. The scene's directed optical graph is
-// compiled into a synchronous dataflow model clocked at the 110 GHz symbol
+// compiled into a synchronous dataflow model clocked by its test fixture
 // rate. Trits ride guides as carrier phase; execution chambers interfere
 // their inputs (balanced saturating sum), SOH matrix tiles add cavity
 // memory (the chamber becomes a saturating ternary integrator), and MoS2
@@ -12,8 +12,8 @@
 @import("scene.zag")
 @import("ternary.zag")
 
-fn carrier_ghz() f64 { return 110.0; }
-fn symbol_period_ps() f64 { return 1000.0 / carrier_ghz(); }   // 9.09 ps
+fn carrier_ghz() f64 { return 80.0; } // isolated legacy probe fixture, not product data
+fn symbol_period_ps() f64 { return 1000.0 / carrier_ghz(); }
 // Group velocity in the GeSn-clad guide (n_g ~ 2.1), nm per ps.
 fn group_velocity_nm_ps() f64 { return 299792.458 / 2.1; }
 fn hist_len() i32 { return 192; }

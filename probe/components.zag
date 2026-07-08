@@ -9,7 +9,7 @@ enum Kind {
     Plate,     // GeSn base plate: substrate waffle grid, 8x8 lattice cells
     Chamber,   // Execution chamber: reflective interference cavity, 3-in/1-out
     Soh,       // SOH matrix tile: crystal memory plane (chamber integrator)
-    Emitter,   // WDM laser emitter: multi-wavelength ternary source @ 110 GHz
+    Emitter,   // legacy isolated probe fixture
     Detector,  // MoS2 photodetector: monolayer phase-discriminating readout
 }
 
@@ -58,7 +58,7 @@ fn kind_blurb(k: Kind) []u8 {
         .Plate => "Substrate waffle grid, 8x8 cells",
         .Chamber => "Interference cavity, 3-in 1-out",
         .Soh => "Crystal memory plane, integrates",
-        .Emitter => "Ternary phase source, 110 GHz",
+        .Emitter => "Ternary phase source, fixture rate",
         .Detector => "Monolayer phase readout",
     };
 }

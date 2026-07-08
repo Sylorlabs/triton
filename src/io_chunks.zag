@@ -203,7 +203,7 @@ fn io_parse_guide_line(s: *Scene, line: []u8, nums: *list.ArrayList[i64]) bool {
         .to_c = list.get[i64](nums.*, 3) as i32,
         .to_p = list.get[i64](nums.*, 4) as i32,
         .path = p,
-        .length_nm = (steps as f64) * pitch_nm(),
+        .length_nm = (steps as f64) * s.*.model.pitch_nm.value,
         .live = 0,
     };
     scene_restore_guide(s, g);

@@ -35,6 +35,7 @@ struct Guide {
 }
 
 struct Scene {
+    model: DeviceModel,
     comps: list.ArrayList[Comp],
     guides: list.ArrayList[Guide],
     occ: hm.Int64Map[i32],          // vox_key -> component id
@@ -58,6 +59,7 @@ struct Scene {
 
 fn scene_new() *Scene {
     let s: *Scene = new(Scene{
+        .model = model_reference_illustrative(),
         .comps = list.make[Comp](32),
         .guides = list.make[Guide](16),
         .occ = hm.int64_make[i32](512),
@@ -354,13 +356,14 @@ fn scene_place(s: *Scene, k: Kind, origin: Vox, rot: i32) i32 {
         .rot = rot,
         .size = kind_fp(k),
         .visible = true,
-        .wl_nm = 1550.0,
+        .wl_nm = s.*.model.chamber_resonance_nm.value,
         .preset = 0,
         .name_ = nm,
     };
     if (k == Kind.Emitter) {
         let chan: i32 = serial - 1;
-        c.wl_nm = 1530.0 + 0.8 * (chan as f64);
+        c.wl_nm = s.*.model.emitter_wavelength_min_nm.value +
+            s.*.model.emitter_wavelength_step_nm.value * (chan as f64);
         c.preset = chan % 4;
     }
 
@@ -553,7 +556,7 @@ fn scene_add_guide(s: *Scene, fc: i32, fp: i32, tc: i32, tp: i32, path: list.Arr
         .to_c = tc,
         .to_p = tp,
         .path = path,
-        .length_nm = (steps as f64) * pitch_nm(),
+        .length_nm = (steps as f64) * s.*.model.pitch_nm.value,
         .live = 0,
     };
     list.push[Guide](&s.*.guides, g);

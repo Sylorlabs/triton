@@ -154,7 +154,7 @@ fn sim_recompile_region(sim: *Sim, s: *Scene) void {
         sim_patch_comp(sim, s, s.*.topo_dirty_ids.data[di]);
         di = di + 1;
     }
-    let new_clock: f64 = sim_clock_from_nodes(sim);
+    let new_clock: f64 = sim_clock_from_nodes(sim, s);
     if (new_clock != sim.*.clock_ghz) {
         sim_recompile(sim, s);
         scene_topo_clear(s);

@@ -146,7 +146,7 @@ fn reroute_incident(s: *Scene, ids: *list.ArrayList[i32]) void {
                     s.*.guides.data[gi].path = np;
                     let steps: i32 = np.len - 1;
                     if (steps < 0) { steps = 0; }
-                    s.*.guides.data[gi].length_nm = (steps as f64) * pitch_nm();
+                    s.*.guides.data[gi].length_nm = (steps as f64) * s.*.model.pitch_nm.value;
                     scene_mark_topo_guides(s);   // path length -> delay changed
                     done = true;
                 } else {
@@ -728,7 +728,19 @@ fn journal_load(j: *Journal, path: []u8) bool {
 
 fn design_save(s: *Scene, path: []u8) bool {
     let out: list.ArrayList[u8] = list.make[u8](1024);
-    ser_text(&out, "zpa 1\n");
+    ser_text(&out, "zpa 2\n");
+    ser_text(&out, "m ");
+    ser_int(&out, s.*.model.schema_version as i64);
+    ser_int(&out, model_known_mask(s.*.model));
+    ser_int(&out, (s.*.model.pitch_nm.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.group_index.value * 1000000.0) as i64);
+    ser_int(&out, (s.*.model.emitter_rate_ghz.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.chamber_rate_ghz.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.detector_rate_ghz.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.emitter_wavelength_min_nm.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.emitter_wavelength_step_nm.value * 1000000.0) as i64);
+    ser_int(&out, (s.*.model.chamber_resonance_nm.value * 1000.0) as i64);
+    ser_text(&out, "\n");
     let i: i32 = 0;
     while (i < s.*.comps.len) {
         let c: Comp = s.*.comps.data[i];
@@ -779,6 +791,10 @@ fn design_save(s: *Scene, path: []u8) bool {
 fn design_load(s: *Scene, path: []u8) bool {
     let raw: []u8 = _zag_read_file(path);
     if (raw.len <= 0) { return false; }
+    if (raw.len < 5) { return false; }
+    let v1: bool = _zag_strcmp(raw[0..5], "zpa 1") == 1;
+    let v2: bool = _zag_strcmp(raw[0..5], "zpa 2") == 1;
+    if (!v1 && !v2) { return false; }
     scene_clear(s);
 
     let nums: list.ArrayList[i64] = list.make[i64](32);
@@ -796,6 +812,24 @@ fn design_load(s: *Scene, path: []u8) bool {
         let line: []u8 = raw[pos..eol];
         pos = eol + 1;
 
+        if (line.len > 2 && (line[0] as i32) == 'm' && (line[1] as i32) == 32) {
+            let mstop: i32 = 0;
+            parse_line_ints(line, 1, &nums, &mstop);
+            if (nums.len >= 10) {
+                let schema: i32 = list.get[i64](nums, 0) as i32;
+                if (schema != 1) { return false; }
+                s.*.model.schema_version = schema;
+                model_apply_known_mask(&s.*.model, list.get[i64](nums, 1));
+                s.*.model.pitch_nm.value = (list.get[i64](nums, 2) as f64) / 1000.0;
+                s.*.model.group_index.value = (list.get[i64](nums, 3) as f64) / 1000000.0;
+                s.*.model.emitter_rate_ghz.value = (list.get[i64](nums, 4) as f64) / 1000.0;
+                s.*.model.chamber_rate_ghz.value = (list.get[i64](nums, 5) as f64) / 1000.0;
+                s.*.model.detector_rate_ghz.value = (list.get[i64](nums, 6) as f64) / 1000.0;
+                s.*.model.emitter_wavelength_min_nm.value = (list.get[i64](nums, 7) as f64) / 1000.0;
+                s.*.model.emitter_wavelength_step_nm.value = (list.get[i64](nums, 8) as f64) / 1000000.0;
+                s.*.model.chamber_resonance_nm.value = (list.get[i64](nums, 9) as f64) / 1000.0;
+            }
+        }
         if (line.len > 2 && (line[0] as i32) == 'c' && (line[1] as i32) == 32) {
             let stop: i32 = 0;
             parse_line_ints(line, 1, &nums, &stop);
@@ -845,7 +879,7 @@ fn design_load(s: *Scene, path: []u8) bool {
                         .to_c = list.get[i64](nums, 3) as i32,
                         .to_p = list.get[i64](nums, 4) as i32,
                         .path = p,
-                        .length_nm = (steps as f64) * pitch_nm(),
+                        .length_nm = (steps as f64) * s.*.model.pitch_nm.value,
                         .live = 0,
                     };
                     scene_restore_guide(s, g);

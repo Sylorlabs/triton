@@ -1,0 +1,120 @@
+// device_model.zag — versioned physical assumptions with explicit provenance.
+// Values in model_reference_illustrative are examples for software verification;
+// they are not measurements and must never be presented as fabricated-device facts.
+
+enum EvidenceClass {
+    Unknown,
+    Measured,
+    Literature,
+    Simulated,
+    UserEntered,
+    Illustrative,
+}
+
+struct PhysicalParam {
+    value: f64,
+    known: bool,
+    units: []u8,
+    source: []u8,
+    source_version: []u8,
+    date_: []u8,
+    method: []u8,
+    uncertainty: f64,
+    confidence: EvidenceClass,
+}
+
+struct DeviceModel {
+    schema_version: i32,
+    id: []u8,
+    pitch_nm: PhysicalParam,
+    group_index: PhysicalParam,
+    emitter_rate_ghz: PhysicalParam,
+    chamber_rate_ghz: PhysicalParam,
+    detector_rate_ghz: PhysicalParam,
+    emitter_wavelength_min_nm: PhysicalParam,
+    emitter_wavelength_step_nm: PhysicalParam,
+    chamber_resonance_nm: PhysicalParam,
+}
+
+fn physical_param(value: f64, units: []u8, method: []u8) PhysicalParam {
+    return PhysicalParam{
+        .value = value, .known = true, .units = units,
+        .source = "Triton illustrative reference fixture",
+        .source_version = "1", .date_ = "2026-07-07", .method = method,
+        .uncertainty = 0.0, .confidence = EvidenceClass.Illustrative,
+    };
+}
+
+fn physical_unknown(units: []u8) PhysicalParam {
+    return PhysicalParam{
+        .value = 0.0, .known = false, .units = units, .source = "Unknown",
+        .source_version = "", .date_ = "", .method = "Not characterized",
+        .uncertainty = 0.0, .confidence = EvidenceClass.Unknown,
+    };
+}
+
+fn model_reference_illustrative() DeviceModel {
+    return DeviceModel{
+        .schema_version = 1,
+        .id = "triton.reference.illustrative.v1",
+        .pitch_nm = physical_param(250.0, "nm", "illustrative CAD lattice"),
+        .group_index = physical_param(2.1, "1", "illustrative waveguide model"),
+        .emitter_rate_ghz = physical_param(110.0, "GHz", "illustrative EO response"),
+        .chamber_rate_ghz = physical_param(180.0, "GHz", "illustrative cavity response"),
+        .detector_rate_ghz = physical_param(140.0, "GHz", "illustrative detector response"),
+        .emitter_wavelength_min_nm = physical_param(1530.0, "nm", "illustrative C-band channel plan"),
+        .emitter_wavelength_step_nm = physical_param(0.8, "nm", "illustrative WDM spacing"),
+        .chamber_resonance_nm = physical_param(1550.0, "nm", "illustrative cavity resonance"),
+    };
+}
+
+fn model_complete(m: DeviceModel) bool {
+    return m.pitch_nm.known && m.group_index.known &&
+        m.emitter_rate_ghz.known && m.chamber_rate_ghz.known &&
+        m.detector_rate_ghz.known && m.emitter_wavelength_min_nm.known &&
+        m.emitter_wavelength_step_nm.known && m.chamber_resonance_nm.known;
+}
+
+fn evidence_class_name(c: EvidenceClass) []u8 {
+    return switch (c) {
+        .Unknown => "Unknown",
+        .Measured => "Measured",
+        .Literature => "Literature-derived",
+        .Simulated => "Simulated",
+        .UserEntered => "User-entered",
+        .Illustrative => "Illustrative",
+    };
+}
+
+fn model_validate(m: DeviceModel) bool {
+    if (m.schema_version != 1) { return false; }
+    if (!model_complete(m)) { return true; }
+    return m.pitch_nm.value > 0.0 && m.group_index.value >= 1.0 &&
+        m.emitter_rate_ghz.value > 0.0 && m.chamber_rate_ghz.value > 0.0 &&
+        m.detector_rate_ghz.value > 0.0 && m.emitter_wavelength_min_nm.value > 0.0 &&
+        m.emitter_wavelength_step_nm.value > 0.0 && m.chamber_resonance_nm.value > 0.0;
+}
+
+fn model_known_mask(m: DeviceModel) i64 {
+    let mask: i64 = 0;
+    if (m.pitch_nm.known) { mask = mask | 1; }
+    if (m.group_index.known) { mask = mask | 2; }
+    if (m.emitter_rate_ghz.known) { mask = mask | 4; }
+    if (m.chamber_rate_ghz.known) { mask = mask | 8; }
+    if (m.detector_rate_ghz.known) { mask = mask | 16; }
+    if (m.emitter_wavelength_min_nm.known) { mask = mask | 32; }
+    if (m.emitter_wavelength_step_nm.known) { mask = mask | 64; }
+    if (m.chamber_resonance_nm.known) { mask = mask | 128; }
+    return mask;
+}
+
+fn model_apply_known_mask(m: *DeviceModel, mask: i64) void {
+    m.*.pitch_nm.known = (mask & 1) != 0;
+    m.*.group_index.known = (mask & 2) != 0;
+    m.*.emitter_rate_ghz.known = (mask & 4) != 0;
+    m.*.chamber_rate_ghz.known = (mask & 8) != 0;
+    m.*.detector_rate_ghz.known = (mask & 16) != 0;
+    m.*.emitter_wavelength_min_nm.known = (mask & 32) != 0;
+    m.*.emitter_wavelength_step_nm.known = (mask & 64) != 0;
+    m.*.chamber_resonance_nm.known = (mask & 128) != 0;
+}

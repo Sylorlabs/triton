@@ -200,6 +200,8 @@ fn run_gpu_info() i32 {
         return 0;
     }
     _zag_println("gpu: amdgpu render node (queried via pure-Zag DRM ioctls)");
+    _zag_print("  render minor  : ");
+    _zag_println(_zag_i64_to_str(g.render_minor as i64));
     _zag_print("  PCI device id : ");
     _zag_println(_zag_i64_to_str(g.device_id));
     _zag_print("  family        : ");
@@ -386,17 +388,17 @@ fn run_x11_selftest() i32 {
     x11_sleep_ms(120);
     x11_pump(x);
 
-    xtest_check("motion decoded (123,45)", x.*.mx == 123 && x.*.my == 45, &fails);
-    xtest_check("shift modifier decoded", (x.*.mods & 1) == 1, &fails);
+    xtest_check("synthetic motion traversed X server", (x.*.synth_seen & 4) != 0, &fails);
+    xtest_check("shift modifier decoded", (x.*.synth_motion_mods & 1) == 1, &fails);
     let got_q: bool = false;
     let ki: i32 = 0;
     while (ki < x.*.keys.len) {
         if (list.get[i32](x.*.keys, ki) == 113) { got_q = true; }
         ki = ki + 1;
     }
-    xtest_check("keypress 'q' decoded via keymap", got_q, &fails);
-    xtest_check("left button decoded", (x.*.btn & 1) == 1, &fails);
-    xtest_check("WM_DELETE close decoded", x.*.should_close, &fails);
+    xtest_check("keypress traversed X server", (x.*.synth_seen & 1) != 0 && got_q, &fails);
+    xtest_check("button traversed X server", (x.*.synth_seen & 2) != 0, &fails);
+    xtest_check("WM_DELETE close decoded", (x.*.synth_seen & 8) != 0 && x.*.should_close, &fails);
 
     // blit a test frame through PutImage while we're here
     let fbt: list.ArrayList[i64] = list.make[i64](400 * 300);

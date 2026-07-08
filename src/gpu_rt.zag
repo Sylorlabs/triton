@@ -1,7 +1,7 @@
 // gpu_rt.zag — a pure-Zag AMDGPU runtime. No libc, no libdrm, no Mesa:
 // this drives the kernel's amdgpu DRM device directly with ioctls issued
 // through the _zag_raw_syscall intrinsic (the same primitive x11.zag uses to
-// speak to the X server). It opens /dev/dri/renderD128, queries the real
+// speak to the X server). It discovers DRM render nodes and queries the real
 // device (DRM_IOCTL_VERSION + AMDGPU_INFO_DEV_INFO), and allocates GEM buffer
 // objects that are CPU-mappable so the software rasterizer can hand work to —
 // and read results back from — GPU-visible memory with zero C in the path.
@@ -156,6 +156,7 @@ struct Gpu {
     cu_active: i64,
     engine_clock_khz: i64,
     memory_clock_khz: i64,
+    render_minor: i32,
     va_base: i64,       // first GPU virtual address usable by userspace
     va_cursor: i64,     // bump pointer for handing out VAs
 }
@@ -165,13 +166,15 @@ fn gpu_bad() Gpu {
         .fd = 0 - 1, .ok = false, .device_id = 0, .family = 0,
         .shader_engines = 0, .cu_active = 0,
         .engine_clock_khz = 0, .memory_clock_khz = 0,
-        .va_base = 0, .va_cursor = 0,
+        .render_minor = 0, .va_base = 0, .va_cursor = 0,
     };
 }
 
-// NUL-terminated device path in a byte buffer (open() wants a C string).
-fn gpu_dev_path() list.ArrayList[u8] {
-    let p: []u8 = "/dev/dri/renderD128";
+// NUL-terminated discovered render-node path (open() wants a C string).
+fn gpu_dev_path(minor: i32) list.ArrayList[u8] {
+    let prefix: []u8 = "/dev/dri/renderD";
+    let suffix: []u8 = _zag_i64_to_str(minor as i64);
+    let p: []u8 = _zag_str_concat(prefix, suffix);
     let b: list.ArrayList[u8] = list.make[u8](p.len + 1);
     let i: i32 = 0;
     while (i < p.len) { list.push[u8](&b, p[i]); i = i + 1; }
@@ -182,41 +185,44 @@ fn gpu_dev_path() list.ArrayList[u8] {
 // Open the render node and query real device parameters. On any failure the
 // returned Gpu has ok=false (callers fall back to the CPU raster path).
 fn gpu_open() Gpu {
-    let path: list.ArrayList[u8] = gpu_dev_path();
-    let fd: i64 = g_open_rw(path.data as i64);
-    list.free[u8](&path);
-    if (fd < 0) { return gpu_bad(); }
-
-    let g: Gpu = Gpu{
-        .fd = fd, .ok = true, .device_id = 0, .family = 0,
-        .shader_engines = 0, .cu_active = 0,
-        .engine_clock_khz = 0, .memory_clock_khz = 0,
-        .va_base = 0, .va_cursor = 0,
-    };
-
-    // AMDGPU_INFO_DEV_INFO → struct drm_amdgpu_info_device (448 bytes)
-    let devinfo: list.ArrayList[u8] = buf_zero(448);
-    let req: list.ArrayList[u8] = buf_zero(32);   // struct drm_amdgpu_info
-    poke64(&req, 0, devinfo.data as i64);         // return_pointer
-    poke32(&req, 8, 448);                         // return_size
-    poke32(&req, 12, AMDGPU_INFO_DEV_INFO() as i64);
-    let rc: i64 = g_ioctl(fd, IOCTL_AMDGPU_INFO(), req.data as i64);
-    let out: Gpu = g;
-    if (rc == 0) {
-        out.device_id = peek32(devinfo, 0);       // device_id
-        out.family = peek32(devinfo, 16);         // family
-        out.shader_engines = peek32(devinfo, 20); // num_shader_engines
-        out.engine_clock_khz = peek64(devinfo, 32);
-        out.memory_clock_khz = peek64(devinfo, 40);
-        out.cu_active = peek32(devinfo, 48);      // cu_active_number
-        out.va_base = peek64(devinfo, 144);       // virtual_address_offset
-        // hand out VAs a comfortable margin above the base (the low span holds
-        // driver-reserved mappings on some kernels)
-        out.va_cursor = out.va_base + 0x1000000;  // +16 MiB
+    let minor: i32 = 128;
+    while (minor < 192) {
+        let path: list.ArrayList[u8] = gpu_dev_path(minor);
+        let fd: i64 = g_open_rw(path.data as i64);
+        list.free[u8](&path);
+        if (fd >= 0) {
+            // AMDGPU_INFO_DEV_INFO → struct drm_amdgpu_info_device (448 bytes).
+            // A non-AMDGPU render node is closed and discovery continues.
+            let devinfo: list.ArrayList[u8] = buf_zero(448);
+            let req: list.ArrayList[u8] = buf_zero(32);
+            poke64(&req, 0, devinfo.data as i64);
+            poke32(&req, 8, 448);
+            poke32(&req, 12, AMDGPU_INFO_DEV_INFO() as i64);
+            let rc: i64 = g_ioctl(fd, IOCTL_AMDGPU_INFO(), req.data as i64);
+            if (rc == 0 && peek32(devinfo, 0) != 0) {
+                let out: Gpu = Gpu{
+                    .fd = fd, .ok = true,
+                    .device_id = peek32(devinfo, 0),
+                    .family = peek32(devinfo, 16),
+                    .shader_engines = peek32(devinfo, 20),
+                    .cu_active = peek32(devinfo, 48),
+                    .engine_clock_khz = peek64(devinfo, 32),
+                    .memory_clock_khz = peek64(devinfo, 40),
+                    .render_minor = minor,
+                    .va_base = peek64(devinfo, 144), .va_cursor = 0,
+                };
+                out.va_cursor = out.va_base + 0x1000000;
+                list.free[u8](&devinfo);
+                list.free[u8](&req);
+                return out;
+            }
+            list.free[u8](&devinfo);
+            list.free[u8](&req);
+            let _closed: i64 = g_close(fd);
+        }
+        minor = minor + 1;
     }
-    list.free[u8](&devinfo);
-    list.free[u8](&req);
-    return out;
+    return gpu_bad();
 }
 
 fn gpu_close(g: *Gpu) void {
