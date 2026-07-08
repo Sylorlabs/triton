@@ -506,3 +506,427 @@ Passing tests does not prove a fabricated photonic device exists or meets a
 physical frequency target. Triton must keep software verification, device-model
 simulation, imported measurement evidence, and laboratory validation as distinct
 levels of confidence.
+Absolutely. Add a **real UI/UX product-design track** to the plan, not “developer slapped buttons on a renderer.”
+
+The UI should feel like a serious CAD/engine-design tool: fast, precise, readable, beautiful, and hard to misuse.
+
+# Part 3 — Professional UI/UX Design Plan
+
+## Goal
+
+Make Triton feel like a modern pro tool:
+
+```text
+snappy like a game engine editor
+precise like CAD
+readable like a waveform/debugger tool
+beautiful like a real product
+not “programmer UI”
+```
+
+---
+
+## 3.1 Design system
+
+* [ ] Create a real design system before adding more UI panels.
+* [ ] Define spacing tokens:
+
+  * [ ] 2 px
+  * [ ] 4 px
+  * [ ] 8 px
+  * [ ] 12 px
+  * [ ] 16 px
+  * [ ] 24 px
+* [ ] Define typography scale:
+
+  * [ ] tiny metadata
+  * [ ] normal panel text
+  * [ ] section headers
+  * [ ] viewport labels
+  * [ ] debug overlay text
+* [ ] Define border radius rules.
+* [ ] Define panel shadow/elevation rules.
+* [ ] Define selected, hovered, focused, disabled, warning, and error states.
+* [ ] Define color tokens instead of hardcoded colors.
+* [ ] Define beam-state colors separately from UI colors.
+* [ ] Make the UI work in dark mode first.
+* [ ] Keep enough contrast that labels are readable without eye strain.
+
+Design tokens example:
+
+```text
+Color.Background.Main
+Color.Background.Panel
+Color.Background.PanelRaised
+Color.Border.Subtle
+Color.Border.Active
+Color.Text.Primary
+Color.Text.Secondary
+Color.Text.Disabled
+Color.Accent.Primary
+Color.Signal.Positive
+Color.Signal.Negative
+Color.Signal.Off
+Color.Error
+Color.Warning
+Color.Valid
+```
+
+---
+
+## 3.2 Layout quality
+
+* [ ] Align every panel to a grid.
+* [ ] Make left/right/bottom panels resizable.
+* [ ] Remember panel sizes between launches.
+* [ ] Use consistent padding inside panels.
+* [ ] Do not let text touch borders.
+* [ ] Do not let controls randomly change height.
+* [ ] Add collapsible panel sections.
+* [ ] Add clean empty states instead of blank/dead panels.
+* [ ] Keep the viewport visually dominant.
+* [ ] Make the status bar useful, not decorative.
+
+Current layout direction is good, but the side panels should eventually feel more like:
+
+```text
+Library      | Viewport | Outliner
+Inspector    |          | Properties
+Signals / timeline at bottom
+Status bar always visible
+```
+
+---
+
+## 3.3 Snappy interaction target
+
+The UI should not merely hit 60 FPS. It should **feel instant**.
+
+Performance targets:
+
+* [ ] Mouse hover response under 16 ms.
+* [ ] Button press visual feedback in the next frame.
+* [ ] Camera orbit/pan/zoom at stable 60 FPS minimum.
+* [ ] Text input has no visible lag.
+* [ ] Dragging parts stays smooth.
+* [ ] Selection outline appears immediately.
+* [ ] Panel resizing is smooth.
+* [ ] Signal timeline scrub feels live.
+* [ ] No UI action blocks on GPU simulation.
+* [ ] No full scene rebuild from simple UI hover.
+
+Hard rule:
+
+```text
+UI interaction must never wait for engine simulation unless the user explicitly runs a blocking operation.
+```
+
+---
+
+## 3.4 Accurate CAD UX
+
+Since Triton is an engine CAD, the UI cannot just look nice. It has to communicate truth.
+
+* [ ] Show exact coordinates for selected objects.
+* [ ] Show exact dimensions for parts and beams.
+* [ ] Show beam state clearly:
+
+  * [ ] Off
+  * [ ] Positive
+  * [ ] Negative
+  * [ ] invalid/conflicting
+* [ ] Show beam orientation by geometry, not just color.
+* [ ] Show depth/layer/height clearly.
+* [ ] Show snapping targets before placement.
+* [ ] Show invalid placements before the user commits.
+* [ ] Show collisions/intersections as first-class visual warnings.
+* [ ] Show whether a connection is physical, logical, simulated, or unverified.
+* [ ] Make every warning clickable/selectable.
+* [ ] Add measurement tools:
+
+  * [ ] distance
+  * [ ] angle
+  * [ ] beam length
+  * [ ] component spacing
+  * [ ] layer height
+* [ ] Add grid snapping.
+* [ ] Add object snapping.
+* [ ] Add port snapping.
+* [ ] Add beam-route snapping.
+
+The UI should never hide uncertainty. If Triton does not know whether something is valid, it should say:
+
+```text
+Unverified
+Approximate
+Simulation mismatch
+Out of bounds
+Collision
+Unsupported component
+```
+
+---
+
+## 3.5 Modern viewport UX
+
+* [ ] Smooth orbit camera.
+* [ ] Smooth pan.
+* [ ] Smooth zoom.
+* [ ] Focus selected object.
+* [ ] Frame all objects.
+* [ ] Reset view.
+* [ ] Top/front/side/isometric camera shortcuts.
+* [ ] Perspective and orthographic modes.
+* [ ] Clickable 3D orientation gizmo.
+* [ ] Grid fades by distance.
+* [ ] Selected objects get clear outlines.
+* [ ] Hovered objects get subtle outlines.
+* [ ] Hidden/occluded selected objects get ghost outlines.
+* [ ] Beam paths remain readable through dense scenes.
+* [ ] Add x/y/z axis colors.
+* [ ] Add world origin marker.
+* [ ] Add clipping/section view later for dense engines.
+
+No fake flat UI for 3D objects. Selection, snapping, and editing should all understand true 3D.
+
+---
+
+## 3.6 Pro-grade tool interactions
+
+* [ ] Add command palette:
+
+  * [ ] `Ctrl+P` or `Ctrl+K`
+  * [ ] search commands
+  * [ ] create parts
+  * [ ] toggle overlays
+  * [ ] jump to object
+* [ ] Add proper shortcuts:
+
+  * [ ] select
+  * [ ] route
+  * [ ] move
+  * [ ] rotate
+  * [ ] duplicate
+  * [ ] delete
+  * [ ] frame selected
+  * [ ] run simulation
+  * [ ] pause simulation
+* [ ] Add undo/redo for every edit.
+* [ ] Add multi-select.
+* [ ] Add box select.
+* [ ] Add object grouping.
+* [ ] Add copy/paste.
+* [ ] Add drag-to-route beams.
+* [ ] Add inline rename.
+* [ ] Add search/filter in outliner.
+* [ ] Add right-click context menus.
+* [ ] Add tooltips that are useful, not noisy.
+
+Professional feel comes from predictable interaction, not just visuals.
+
+---
+
+## 3.7 Library panel redesign
+
+The current library panel should become a clean component browser.
+
+* [ ] Search bar at top.
+* [ ] Category tabs:
+
+  * [ ] Base
+  * [ ] Emitters
+  * [ ] Sensors
+  * [ ] Chambers
+  * [ ] Logic
+  * [ ] Routing
+  * [ ] Debug
+* [ ] Component cards with:
+
+  * [ ] icon
+  * [ ] name
+  * [ ] short description
+  * [ ] port count
+  * [ ] beam compatibility
+* [ ] Drag component into viewport.
+* [ ] Preview ghost before placement.
+* [ ] Invalid placement shows red outline.
+* [ ] Valid placement shows snap highlight.
+
+---
+
+## 3.8 Inspector redesign
+
+Inspector should feel like a real properties editor.
+
+* [ ] Show selected object name/type.
+* [ ] Show transform:
+
+  * [ ] position x/y/z
+  * [ ] rotation
+  * [ ] scale/dimensions
+* [ ] Show engine-specific properties:
+
+  * [ ] beam state
+  * [ ] port states
+  * [ ] material/model
+  * [ ] timing delay
+  * [ ] simulation status
+* [ ] Use numeric fields with step controls.
+* [ ] Support precise typing.
+* [ ] Support units.
+* [ ] Highlight changed values.
+* [ ] Show validation errors inline.
+* [ ] Do not bury important state in tiny text.
+
+---
+
+## 3.9 Outliner redesign
+
+* [ ] Tree view of scene.
+* [ ] Search/filter.
+* [ ] Icons by object type.
+* [ ] Visibility toggle.
+* [ ] Lock toggle.
+* [ ] Error/warning badges.
+* [ ] Signal-state badges.
+* [ ] Click object to select.
+* [ ] Double-click to frame object.
+* [ ] Drag to reorder/group.
+* [ ] Right-click context menu.
+
+The outliner should be a serious navigation tool, not just a list.
+
+---
+
+## 3.10 Signal timeline redesign
+
+The bottom signal panel could become one of Triton’s signature features.
+
+* [ ] Smooth waveform rendering.
+* [ ] Zoomable timeline.
+* [ ] Scrubbable simulation time.
+* [ ] Per-signal rows.
+* [ ] Clear `-1 / 0 / +1` states.
+* [ ] Hover to inspect exact tick/time/state.
+* [ ] Click a signal row to highlight its beam path in 3D.
+* [ ] Click a beam path to highlight its waveform.
+* [ ] Show propagation delay.
+* [ ] Show invalid/conflicting states.
+* [ ] Allow pinning important signals.
+* [ ] Allow hiding noisy signals.
+
+This should feel like a mix of CAD + logic analyzer + optical engine debugger.
+
+---
+
+## 3.11 Animation and polish
+
+Use subtle motion, not flashy junk.
+
+* [ ] Hover transitions under 100 ms.
+* [ ] Selection outline fades in quickly.
+* [ ] Panels resize smoothly.
+* [ ] Drag ghost follows cursor exactly.
+* [ ] Snap target gently lights up.
+* [ ] Invalid operation shakes or flashes subtly.
+* [ ] Simulation tick can pulse active beams.
+* [ ] Do not animate things that hurt precision.
+* [ ] Allow reduced motion mode.
+
+The UI should feel alive but not distracting.
+
+---
+
+## 3.12 UI rendering architecture
+
+Separate UI rendering from the 3D viewport.
+
+```text
+3D Viewport Renderer:
+  grid
+  parts
+  beam volumes
+  depth
+  selection outlines
+
+UI Renderer:
+  panels
+  buttons
+  text
+  icons
+  waveform display
+  overlays
+```
+
+Checklist:
+
+* [ ] UI has its own draw list.
+* [ ] UI has its own clipping rectangles.
+* [ ] UI has its own text atlas.
+* [ ] UI batches quads.
+* [ ] UI batches glyphs.
+* [ ] UI uses retained layout state.
+* [ ] UI does not rebuild every widget every frame unless needed.
+* [ ] Viewport redraw does not force panel redraw.
+* [ ] Panel hover does not force 3D scene rebuild.
+* [ ] Signal waveform update does not force full UI rebuild.
+
+---
+
+# UI/UX Acceptance Checklist
+
+## Visual quality
+
+* [ ] Looks intentional, not accidental.
+* [ ] Consistent spacing everywhere.
+* [ ] Consistent font sizes.
+* [ ] Consistent icon style.
+* [ ] Consistent hover/active/selected states.
+* [ ] No blurry text.
+* [ ] No jittering lines.
+* [ ] No random misalignment.
+* [ ] No cramped panel content.
+* [ ] No mystery colors without meaning.
+
+## UX quality
+
+* [ ] A new user can place a part in under 10 seconds.
+* [ ] A new user can connect two parts in under 20 seconds.
+* [ ] A user can tell whether a beam is `-1`, `0`, or `+1` instantly.
+* [ ] A user can tell what object is selected instantly.
+* [ ] A user can tell why an object is invalid.
+* [ ] A user can inspect exact coordinates and beam state.
+* [ ] A user can undo every edit.
+* [ ] A user can recover from mistakes without restarting.
+
+## Performance quality
+
+* [ ] UI hover never causes frame hitching.
+* [ ] Camera movement remains smooth.
+* [ ] Opening panels does not lag.
+* [ ] Text rendering does not dominate frame time.
+* [ ] Signal timeline scrolls smoothly.
+* [ ] Viewport and panels can redraw independently.
+* [ ] Normal interaction stays at 60 FPS minimum.
+
+---
+
+# Updated priority order
+
+```text
+1. Add frame timing overlay.
+2. Build design tokens.
+3. Clean panel spacing, typography, and states.
+4. Separate UI renderer from 3D viewport renderer.
+5. Add dirty flags for UI vs viewport vs signals.
+6. Make text atlas/glyph batching solid.
+7. Add proper selection/hover/focus states.
+8. Add professional inspector fields.
+9. Add command palette and shortcuts.
+10. Add true 3D picking/snapping feedback.
+11. Add signal timeline polish.
+12. Add visual QA checklist before every release.
+```
+
+The standard should be: **Triton looks like a designer and CAD engineer built it together**, while the engine underneath stays mathematically accurate.
+
