@@ -929,4 +929,4 @@ Checklist:
 ```
 
 The standard should be: **Triton looks like a designer and CAD engineer built it together**, while the engine underneath stays mathematically accurate.
-
+also same logic applys for flash if it causes problems flash lives at /home/micah/Desktop/Sylorlabs/flash you have full permission for any change or invasive changes of flash just save to git history and then your good to go also try to get flash working on the photonic proccesor too make sure triton has an option and support for flash language to test it on the photonic unit and what happens when you run certain flash code also agents like you llm agents should have access to everything i mean everything every control screenshots id tagging accurate clicking i want flash support for this language and i want you to make flash truly amazing too
