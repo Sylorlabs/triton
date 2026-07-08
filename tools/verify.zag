@@ -1,0 +1,59 @@
+// verify.zag — the single machine-readable Triton test entry point.
+// This orchestrator is compiled and run by the supported self-hosted znc.
+
+@import("../std/rt.zag")
+
+fn json_result(name_: []u8, state: []u8, rc: i32) void {
+    let a: []u8 = _zag_str_concat("{\"suite\":\"", name_);
+    let b: []u8 = _zag_str_concat(a, "\",\"state\":\"");
+    let c: []u8 = _zag_str_concat(b, state);
+    let d: []u8 = _zag_str_concat(c, "\",\"exit_code\":");
+    let e: []u8 = _zag_str_concat(d, _zag_i64_to_str(rc as i64));
+    _zag_println(_zag_str_concat(e, "}"));
+}
+
+fn run_suite(name_: []u8, cmd: []u8) bool {
+    _zag_print("== "); _zag_print(name_); _zag_println(" ==");
+    let rc: i32 = _zag_exec_cmd(cmd);
+    if (rc == 0) { json_result(name_, "pass", rc); return true; }
+    json_result(name_, "fail", rc);
+    return false;
+}
+
+fn main() i32 {
+    let mode: []u8 = "safe";
+    if (_zag_argc() > 1) { mode = _zag_arg(1); }
+    let fails: i32 = 0;
+
+    if (!run_suite("build-production", "rm -f zagpa.new && ../zag/zag-poc/znc src/main.zag -o zagpa.new && mv -f zagpa.new zagpa")) { fails = fails + 1; }
+    if (!run_suite("engine", "rm -f probe/engine_test.new && ../zag/zag-poc/znc probe/engine_test.zag -o probe/engine_test.new && mv -f probe/engine_test.new probe/engine_test && ./probe/engine_test")) { fails = fails + 1; }
+    if (!run_suite("x11-pixel-pack", "rm -f probe/x11_pixel_pack_test.new && ../zag/zag-poc/znc probe/x11_pixel_pack_test.zag -o probe/x11_pixel_pack_test.new && mv -f probe/x11_pixel_pack_test.new probe/x11_pixel_pack_test && ./probe/x11_pixel_pack_test")) { fails = fails + 1; }
+    if (!run_suite("headless-render", "./zagpa --smoke /tmp/triton_verify_smoke.bmp")) { fails = fails + 1; }
+    if (!run_suite("agent-protocol", "./zagpa --agent examples/agent_demo.tcmd")) { fails = fails + 1; }
+
+    if (_zag_getenv("DISPLAY").len > 0) {
+        if (!run_suite("x11-live", "./zagpa --x11-selftest")) { fails = fails + 1; }
+    } else {
+        json_result("x11-live", "not-run", 0);
+        if (_zag_strcmp(mode, "release") == 1) { fails = fails + 1; }
+    }
+
+    if (_zag_strcmp(mode, "gpu-memory") == 1 || _zag_strcmp(mode, "gpu-dispatch") == 1) {
+        if (!run_suite("gpu-memory", "rm -f probe/gpu_test.new && ../zag/zag-poc/znc probe/gpu_test.zag -o probe/gpu_test.new && mv -f probe/gpu_test.new probe/gpu_test && ./probe/gpu_test")) { fails = fails + 1; }
+    } else {
+        json_result("gpu-memory", "not-run", 0);
+    }
+    if (_zag_strcmp(mode, "gpu-dispatch") == 1) {
+        if (!run_suite("gpu-submit", "rm -f probe/gpu_submit_test.new && ../zag/zag-poc/znc probe/gpu_submit_test.zag -o probe/gpu_submit_test.new && mv -f probe/gpu_submit_test.new probe/gpu_submit_test && ./probe/gpu_submit_test")) { fails = fails + 1; }
+        if (!run_suite("gpu-compute", "rm -f probe/gpu_compute_test.new && ../zag/zag-poc/znc probe/gpu_compute_test.zag -o probe/gpu_compute_test.new && mv -f probe/gpu_compute_test.new probe/gpu_compute_test && ./probe/gpu_compute_test")) { fails = fails + 1; }
+    } else {
+        json_result("gpu-submit", "not-run", 0);
+        json_result("gpu-compute", "not-run", 0);
+    }
+
+    if (fails == 0) { _zag_println("{\"summary\":\"pass\",\"failures\":0}"); return 0; }
+    _zag_print("{\"summary\":\"fail\",\"failures\":");
+    _zag_print(_zag_i64_to_str(fails as i64));
+    _zag_println("}");
+    return 1;
+}

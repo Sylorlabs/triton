@@ -212,9 +212,9 @@ fn main() i32 {
     }
 
     // ── save / load roundtrip ──
-    check("save design", design_save(s, "/tmp/claude-1000/zpa_test.zpa"), &fails);
+    check("save design", design_save(s, "/tmp/triton_engine_test.zpa"), &fails);
     let s2: *Scene = scene_new();
-    check("load design", design_load(s2, "/tmp/claude-1000/zpa_test.zpa"), &fails);
+    check("load design", design_load(s2, "/tmp/triton_engine_test.zpa"), &fails);
     check("roundtrip: component count", s2.*.comps.len == s.*.comps.len, &fails);
     check("roundtrip: guide count", s2.*.guides.len == s.*.guides.len, &fails);
     let rt_ok: bool = true;
@@ -241,9 +241,9 @@ fn main() i32 {
     let _jp: i32 = scene_place(s, Kind.Plate, vox(140, 0, 0), 0);
     let jch: i32 = scene_place(s, Kind.Chamber, vox(140, 1, 0), 0);
     op_add_comp(&jj, s, jch);
-    check("journal: save", journal_save(&jj, "/tmp/claude-1000/jrn_test.jrn"), &fails);
+    check("journal: save", journal_save(&jj, "/tmp/triton_engine_test.jrn"), &fails);
     let jj2: Journal = journal_new();
-    check("journal: load", journal_load(&jj2, "/tmp/claude-1000/jrn_test.jrn"), &fails);
+    check("journal: load", journal_load(&jj2, "/tmp/triton_engine_test.jrn"), &fails);
     check("journal: roundtrip undo depth", jj2.undo.len == jj.undo.len, &fails);
     let comps_before: i32 = s.*.comps.len;
     check("journal: loaded undo works", journal_undo(&jj2, s) && s.*.comps.len == comps_before - 1, &fails);

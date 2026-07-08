@@ -30,12 +30,17 @@ rm -f probe/x11_pixel_pack_test.new
 mv -f probe/x11_pixel_pack_test.new probe/x11_pixel_pack_test
 ./probe/x11_pixel_pack_test
 
-# Device-info query only — a read-only ioctl, cannot submit work or hang the GPU.
-echo "== GPU runtime selftest (pure-Zag DRM ioctls; skips if no render node) =="
-rm -f probe/gpu_test.new
-"$ZNC" probe/gpu_test.zag -o probe/gpu_test.new
-mv -f probe/gpu_test.new probe/gpu_test
-./probe/gpu_test
+# GPU access is never part of the default build. Even a buffer-allocation probe
+# touches the display adapter and therefore belongs behind an explicit opt-in.
+if [ "${TRITON_GPU_MEMORY_TEST:-0}" = "1" ]; then
+    echo "== GPU memory probe (opt-in; no command submission) =="
+    rm -f probe/gpu_test.new
+    "$ZNC" probe/gpu_test.zag -o probe/gpu_test.new
+    mv -f probe/gpu_test.new probe/gpu_test
+    ./probe/gpu_test
+else
+    echo "== GPU memory probe: NOT RUN (set TRITON_GPU_MEMORY_TEST=1) =="
+fi
 
 # The compute-dispatch tests SUBMIT work to the GPU. On a single-GPU box that is
 # also your display adapter, a bad submit can hang the desktop — so they are
@@ -63,7 +68,10 @@ if [ -n "$DISPLAY" ]; then
     echo "== X11 wire-protocol round-trip selftest =="
     ./zagpa --x11-selftest
 else
-    echo "== (no DISPLAY: skipping X11 selftest) =="
+    echo "== X11 selftest: NOT RUN (DISPLAY is unset) =="
+    if [ "${TRITON_REQUIRE_X11:-0}" = "1" ]; then
+        exit 1
+    fi
 fi
 
 echo "== agent smoke =="
