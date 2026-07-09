@@ -667,7 +667,8 @@ not “programmer UI”
 * [x] Define beam-state colors separately from UI colors. Evidence:
   `src/ternary.zag` versus `src/ui.zag`.
 * [x] Make the UI work in dark mode first. Evidence: live X11 captures.
-* [ ] Keep enough contrast that labels are readable without eye strain.
+* [x] Keep enough contrast that labels are readable without eye strain.
+  Evidence: `ui-tokens` primary/secondary text contrast assertions.
 
 Design tokens example:
 
