@@ -1106,6 +1106,16 @@ fn draw_viewport(a: *App) void {
         line2d(f, gx, gy, gx, gy - 14, rgb(120, 200, 120));
     }
 
+    // rubber-band selection box
+    if (a.*.box_sel) {
+        let bx: i32 = imin(a.*.box_x0, a.*.inp.mx);
+        let by: i32 = imin(a.*.box_y0, a.*.inp.my);
+        let bw: i32 = imax(a.*.box_x0, a.*.inp.mx) - bx;
+        let bh: i32 = imax(a.*.box_y0, a.*.inp.my) - by;
+        blend_rect(f, bx, by, bw, bh, th_accent(), 48);
+        rect_outline(f, bx, by, bw, bh, th_accent_hot());
+    }
+
     draw_frame_timing_overlay(a, vp);
 
     fb_clip_reset(f);

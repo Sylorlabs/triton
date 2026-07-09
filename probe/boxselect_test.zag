@@ -1,0 +1,53 @@
+// boxselect_test.zag — rubber-band box selection and multi-select
+// (Masterplan Section 3.6 / Phase F). Exercises the selection logic directly
+// against the real projection.
+
+@import("../std/list.zag") as list
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1024, 640);
+    let _pl: i32 = scene_place(a.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    let _e1: i32 = scene_place(a.*.scene, Kind.Emitter, vox(1, 1, 2), 0);
+    let _e2: i32 = scene_place(a.*.scene, Kind.Emitter, vox(3, 1, 2), 0);
+    let _e3: i32 = scene_place(a.*.scene, Kind.Emitter, vox(5, 1, 4), 0);
+    app_frame_all(a);
+    app_frame(a, 0.016);   // run one frame so cam_update initializes the projection
+    let total: i32 = a.*.scene.*.comps.len;
+
+    let vp: Rect = zone_center(a);
+    // A box over the whole viewport selects every visible component.
+    app_box_select(a, vp.x, vp.y, vp.x + vp.w, vp.y + vp.h, false);
+    check("box over the whole viewport selects every component", a.*.sel.len == total, &failures);
+    check("box selection is a multi-selection", a.*.sel.len >= 3, &failures);
+
+    // A tiny box in the empty top-left corner selects nothing.
+    app_box_select(a, vp.x, vp.y, vp.x + 2, vp.y + 2, false);
+    check("a tiny empty box selects nothing", a.*.sel.len == 0, &failures);
+
+    // Additive box select keeps the prior selection and adds to it.
+    sel_set(a, _pl);
+    app_box_select(a, vp.x, vp.y, vp.x + vp.w, vp.y + vp.h, true);
+    check("additive box select accumulates without duplicates", a.*.sel.len == total, &failures);
+
+    // Replace mode drops the prior selection.
+    app_box_select(a, vp.x, vp.y, vp.x + vp.w, vp.y + vp.h, false);
+    check("replace-mode box select replaces the selection", a.*.sel.len == total, &failures);
+
+    // Shift-click multi-select via the selection model.
+    sel_set(a, _e1);
+    sel_toggle(a, _e2);
+    sel_toggle(a, _e3);
+    check("shift-toggle builds a multi-selection", a.*.sel.len == 3, &failures);
+    sel_toggle(a, _e2);
+    check("shift-toggle removes from the selection", a.*.sel.len == 2 && !sel_has(a, _e2), &failures);
+
+    if (failures == 0) { _zag_println("BOXSELECT: ALL PASS"); return 0; }
+    _zag_println("BOXSELECT: FAILURES"); return 1;
+}

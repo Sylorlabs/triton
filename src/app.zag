@@ -109,6 +109,9 @@ struct App {
     palette_open: bool,     // command palette open
     palette_text: list.ArrayList[u8],
     palette_sel: i32,       // highlighted row in the filtered command list
+    box_sel: bool,          // dragging a rubber-band selection box
+    box_x0: i32,
+    box_y0: i32,
 }
 
 fn app_new(w: i32, h: i32) *App {
@@ -176,6 +179,9 @@ fn app_new(w: i32, h: i32) *App {
         .palette_open = false,
         .palette_text = list.make[u8](32),
         .palette_sel = 0,
+        .box_sel = false,
+        .box_x0 = 0,
+        .box_y0 = 0,
     });
     a.*.inp.w = w;
     a.*.inp.h = h;
@@ -281,9 +287,41 @@ fn sel_toggle(a: *App, id: i32) void {
     a.*.sel_guide = 0 - 1;
 }
 
+fn sel_add(a: *App, id: i32) void {
+    if (!sel_has(a, id)) { list.push[i32](&a.*.sel, id); }
+    a.*.sel_guide = 0 - 1;
+}
+
 fn sel_primary(a: *App) i32 {
     if (a.*.sel.len == 0) { return 0 - 1; }
     return list.get[i32](a.*.sel, a.*.sel.len - 1);
+}
+
+// Select every component whose projected center falls inside the screen-space
+// box (x0,y0)-(x1,y1). `add` keeps the current selection; otherwise it replaces.
+fn app_box_select(a: *App, x0: i32, y0: i32, x1: i32, y1: i32, add: bool) void {
+    let vp: Rect = zone_center(a);
+    if (!add) { sel_clear(a); }
+    let lo_x: i32 = imin(x0, x1);
+    let hi_x: i32 = imax(x0, x1);
+    let lo_y: i32 = imin(y0, y1);
+    let hi_y: i32 = imax(y0, y1);
+    let i: i32 = 0;
+    while (i < a.*.scene.*.comps.len) {
+        let c: Comp = a.*.scene.*.comps.data[i];
+        let e: Vox = comp_ext(c);
+        let ctr: Vec3 = v3(
+            (c.origin.x as f64) + (e.x as f64) * 0.5,
+            (c.origin.y as f64) + (e.y as f64) * 0.5,
+            (c.origin.z as f64) + (e.z as f64) * 0.5,
+        );
+        let p: P3 = vp_proj(a.*.cam, vp, ctr);
+        if (p.ok && (p.x as i32) >= lo_x && (p.x as i32) <= hi_x &&
+            (p.y as i32) >= lo_y && (p.y as i32) <= hi_y) {
+            sel_add(a, c.id);
+        }
+        i = i + 1;
+    }
 }
 
 // drop ids that no longer exist (after deletes/undo)
@@ -731,11 +769,25 @@ fn app_viewport_input(a: *App) void {
     if (btn_pressed(inp, 0)) {
         let hit: i32 = vp_pick_comp(a.*.scene, a.*.cam, vp, inp.*.mx, inp.*.my);
         if (hit < 0) {
-            if (!shift_down(inp)) { sel_clear(a); }
+            // empty press: begin a rubber-band box; clear/commit deferred to release
+            a.*.box_sel = true;
+            a.*.box_x0 = inp.*.mx;
+            a.*.box_y0 = inp.*.my;
         } else {
+            a.*.box_sel = false;
             if (shift_down(inp)) { sel_toggle(a, hit); }
             else { sel_set(a, hit); }
         }
+    }
+    if (a.*.box_sel && btn_released(inp, 0)) {
+        let dx: i32 = imax(a.*.box_x0 - inp.*.mx, inp.*.mx - a.*.box_x0);
+        let dy: i32 = imax(a.*.box_y0 - inp.*.my, inp.*.my - a.*.box_y0);
+        if (dx > 3 || dy > 3) {
+            app_box_select(a, a.*.box_x0, a.*.box_y0, inp.*.mx, inp.*.my, shift_down(inp));
+        } else if (!shift_down(inp)) {
+            sel_clear(a);   // a plain click on empty space clears
+        }
+        a.*.box_sel = false;
     }
 }
 

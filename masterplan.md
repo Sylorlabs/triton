@@ -875,8 +875,11 @@ No fake flat UI for 3D objects. Selection, snapping, and editing should all unde
   * [x] run simulation. Evidence: `Space`; `shortcuts` gate.
   * [x] pause simulation. Evidence: `Space`; `shortcuts` gate.
 * [ ] Add undo/redo for every edit.
-* [ ] Add multi-select.
-* [ ] Add box select.
+* [x] Add multi-select. Evidence: `sel_add`/`sel_toggle` shift-click model;
+  `boxselect` gate builds and trims a multi-selection.
+* [x] Add box select. Evidence: `app_box_select` projects each component center
+  and selects those inside the rubber-band rect (drawn in `draw_viewport`);
+  `boxselect` gate verifies whole-viewport, empty, additive, and replace boxes.
 * [ ] Add object grouping.
 * [ ] Add copy/paste.
 * [ ] Add drag-to-route beams.

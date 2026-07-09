@@ -38,3 +38,4 @@ tools/verify
 zagpa.baseline
 probe/*.baseline
 probe/shortcuts_test
+probe/boxselect_test
