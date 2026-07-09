@@ -112,6 +112,7 @@ struct App {
     box_sel: bool,          // dragging a rubber-band selection box
     box_x0: i32,
     box_y0: i32,
+    clipboard: list.ArrayList[Comp],   // copied component snapshots (copy/paste)
 }
 
 fn app_new(w: i32, h: i32) *App {
@@ -182,6 +183,7 @@ fn app_new(w: i32, h: i32) *App {
         .box_sel = false,
         .box_x0 = 0,
         .box_y0 = 0,
+        .clipboard = list.make[Comp](8),
     });
     a.*.inp.w = w;
     a.*.inp.h = h;
@@ -498,6 +500,61 @@ fn app_delete_selection(a: *App) void {
         else { app_log(a, _zag_str_concat(_zag_i64_to_str(n as i64), " components removed")); }
     }
     sel_clear(a);
+}
+
+// Copy the current component selection into the clipboard (snapshots only).
+fn app_copy(a: *App) void {
+    a.*.clipboard.len = 0;
+    let i: i32 = 0;
+    while (i < a.*.sel.len) {
+        let ci: i32 = scene_comp_index(a.*.scene, list.get[i32](a.*.sel, i));
+        if (ci >= 0) {
+            let c: Comp = a.*.scene.*.comps.data[ci];
+            c.name_ = "";
+            list.push[Comp](&a.*.clipboard, c);
+        }
+        i = i + 1;
+    }
+    if (a.*.clipboard.len > 0) {
+        app_log(a, _zag_str_concat(_zag_i64_to_str(a.*.clipboard.len as i64), " copied"));
+    }
+}
+
+// Paste clipboard components at a fixed offset; each placeable copy is a journaled
+// add and becomes the new selection. Copies that would collide are skipped.
+fn app_paste(a: *App) void {
+    if (a.*.clipboard.len == 0) { return; }
+    let delta: Vox = vox(2, 0, 0);
+    sel_clear(a);
+    let placed: i32 = 0;
+    let i: i32 = 0;
+    while (i < a.*.clipboard.len) {
+        let c: Comp = a.*.clipboard.data[i];
+        let no: Vox = vox_add(c.origin, delta);
+        let nid: i32 = scene_place(a.*.scene, c.kind, no, c.rot);
+        if (nid > 0) {
+            let ci: i32 = scene_comp_index(a.*.scene, nid);
+            if (ci >= 0) {
+                a.*.scene.*.comps.data[ci].wl_nm = c.wl_nm;
+                a.*.scene.*.comps.data[ci].preset = c.preset;
+                a.*.scene.*.comps.data[ci].logic_op = c.logic_op;
+                a.*.scene.*.comps.data[ci].size = c.size;
+                scene_mark_topo_comp(a.*.scene, nid);
+            }
+            op_add_comp(&a.*.jrn, a.*.scene, nid);
+            sel_add(a, nid);
+            // advance the clipboard so the next paste marches further along
+            a.*.clipboard.data[i].origin = no;
+            placed = placed + 1;
+        }
+        i = i + 1;
+    }
+    if (placed > 0) {
+        app_mark_dirty(a);
+        app_log(a, _zag_str_concat(_zag_i64_to_str(placed as i64), " pasted"));
+    } else {
+        app_log(a, "paste: no room at the offset");
+    }
 }
 
 fn app_undo(a: *App) void {
@@ -826,6 +883,8 @@ fn app_keys(a: *App) void {
         }
         if (key_hit(inp, 'z' as i32)) { app_undo(a); }
         if (key_hit(inp, 'y' as i32)) { app_redo(a); }
+        if (key_hit(inp, 'c' as i32)) { app_copy(a); }
+        if (key_hit(inp, 'v' as i32)) { app_paste(a); }
         if (key_hit(inp, 'q' as i32)) { a.*.quit = true; }
         return;
     }

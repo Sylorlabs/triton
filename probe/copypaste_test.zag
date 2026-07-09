@@ -1,0 +1,53 @@
+// copypaste_test.zag — copy/paste of components (Masterplan Section 3.6 / Phase F).
+// Copy snapshots the selection; paste places journaled copies (single undo) at an
+// offset, preserving component properties, and selects them.
+
+@import("../std/list.zag") as list
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1024, 640);
+    let _pl: i32 = scene_place(a.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    let e1: i32 = scene_place(a.*.scene, Kind.Emitter, vox(1, 1, 2), 0);
+    // Give the emitter a distinctive pattern so we can confirm the paste copied it.
+    let ei: i32 = scene_comp_index(a.*.scene, e1);
+    a.*.scene.*.comps.data[ei].preset = 6;
+
+    sel_set(a, e1);
+    app_copy(a);
+    check("copy captures the selection", a.*.clipboard.len == 1, &failures);
+
+    let before: i32 = a.*.scene.*.comps.len;
+    app_paste(a);
+    check("paste adds a component", a.*.scene.*.comps.len == before + 1, &failures);
+    check("paste selects the new copy", a.*.sel.len == 1 && sel_primary(a) != e1, &failures);
+
+    let np: i32 = sel_primary(a);
+    let nci: i32 = scene_comp_index(a.*.scene, np);
+    let ok_copy: bool = nci >= 0 &&
+        a.*.scene.*.comps.data[nci].kind == Kind.Emitter &&
+        a.*.scene.*.comps.data[nci].preset == 6 &&
+        !vox_eq(a.*.scene.*.comps.data[nci].origin, vox(1, 1, 2));
+    check("pasted copy preserves kind and properties at an offset", ok_copy, &failures);
+    check("pasted scene is structurally valid", scene_validation_errors(a.*.scene) == 0, &failures);
+
+    // Paste is a single undo.
+    app_undo(a);
+    check("undo removes the pasted copy in one step", a.*.scene.*.comps.len == before, &failures);
+    app_redo(a);
+    check("redo restores the pasted copy", a.*.scene.*.comps.len == before + 1, &failures);
+
+    // Paste again offsets from the same clipboard (repeatable).
+    let before2: i32 = a.*.scene.*.comps.len;
+    app_paste(a);
+    check("paste is repeatable", a.*.scene.*.comps.len == before2 + 1, &failures);
+
+    if (failures == 0) { _zag_println("COPYPASTE: ALL PASS"); return 0; }
+    _zag_println("COPYPASTE: FAILURES"); return 1;
+}

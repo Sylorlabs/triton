@@ -885,7 +885,9 @@ No fake flat UI for 3D objects. Selection, snapping, and editing should all unde
   and selects those inside the rubber-band rect (drawn in `draw_viewport`);
   `boxselect` gate verifies whole-viewport, empty, additive, and replace boxes.
 * [ ] Add object grouping.
-* [ ] Add copy/paste.
+* [x] Add copy/paste. Evidence: `app_copy`/`app_paste` (Ctrl+C/Ctrl+V, Edit menu,
+  palette) snapshot the selection and place journaled, property-preserving copies
+  at a marching offset; `copypaste` gate covers copy, paste, undo/redo, and repeat.
 * [ ] Add drag-to-route beams.
 * [ ] Add inline rename.
 * [ ] Add search/filter in outliner.

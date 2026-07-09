@@ -30,6 +30,8 @@ fn app_action(a: *App, code: i32) void {
     if (code == 12) { app_duplicate(a); }
     if (code == 13) { app_delete_selection(a); }
     if (code == 14) { sel_clear(a); }
+    if (code == 15) { app_copy(a); }
+    if (code == 16) { app_paste(a); }
     if (code == 20) { app_frame_selected(a); }
     if (code == 21) { app_frame_all(a); }
     if (code == 22) {
@@ -76,6 +78,8 @@ fn palette_commands(out: *list.ArrayList[PCmd]) void {
     list.push[PCmd](out, PCmd{ .label = "Undo", .hint = "Ctrl+Z", .code = 10 });
     list.push[PCmd](out, PCmd{ .label = "Redo", .hint = "Ctrl+Y", .code = 11 });
     list.push[PCmd](out, PCmd{ .label = "Duplicate Selection", .hint = "Shift+D", .code = 12 });
+    list.push[PCmd](out, PCmd{ .label = "Copy", .hint = "Ctrl+C", .code = 15 });
+    list.push[PCmd](out, PCmd{ .label = "Paste", .hint = "Ctrl+V", .code = 16 });
     list.push[PCmd](out, PCmd{ .label = "Delete Selection", .hint = "X", .code = 13 });
     list.push[PCmd](out, PCmd{ .label = "Deselect All", .hint = "Esc", .code = 14 });
     list.push[PCmd](out, PCmd{ .label = "Frame Selected", .hint = "F", .code = 20 });
@@ -266,6 +270,8 @@ fn menu_items(m: i32, out: *list.ArrayList[MenuItem]) void {
         list.push[MenuItem](out, MenuItem{ .label = "Redo", .hint = "Ctrl+Y", .code = 11 });
         list.push[MenuItem](out, MenuItem{ .label = "", .hint = "", .code = 0 });
         list.push[MenuItem](out, MenuItem{ .label = "Duplicate", .hint = "Shift+D", .code = 12 });
+        list.push[MenuItem](out, MenuItem{ .label = "Copy", .hint = "Ctrl+C", .code = 15 });
+        list.push[MenuItem](out, MenuItem{ .label = "Paste", .hint = "Ctrl+V", .code = 16 });
         list.push[MenuItem](out, MenuItem{ .label = "Delete", .hint = "X", .code = 13 });
         list.push[MenuItem](out, MenuItem{ .label = "Deselect", .hint = "Esc", .code = 14 });
         list.push[MenuItem](out, MenuItem{ .label = "", .hint = "", .code = 0 });
