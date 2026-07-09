@@ -267,7 +267,7 @@ fn gpu_alloc(g: *Gpu, size: i64) GpuBuf {
     poke32(&mm, 0, handle);
     let mrc: i64 = g_ioctl(g.*.fd, IOCTL_AMDGPU_GEM_MMAP(), mm.data as i64);
     if (mrc != 0) { list.free[u8](&mm); return gpu_free_handle(g, handle); }
-    let off: i64 = peek64(mm, 0);              // fake mmap offset
+    let off: i64 = peek64(mm, 0);              // driver-provided mmap offset
     list.free[u8](&mm);
 
     let addr: i64 = g_mmap(size, g.*.fd, off);

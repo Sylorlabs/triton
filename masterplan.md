@@ -531,7 +531,8 @@ GPU work must remain bounded, reviewed, opt-in, and safe for a display GPU.
 - [x] Document how to reproduce the reference PCU and all verification results.
       Evidence: `docs/REPRODUCE_REFERENCE_PCU.md` and the release-gated
       `flash-photonic`/`deterministic-trace` suites.
-- [ ] Remove stale probe-era and marketing language.
+- [x] Remove stale probe-era and marketing language. Evidence:
+      `stale-language-audit` and `unsupported-claim-audit` gates.
 - [ ] Add release notes tied to verified behavior, not commit count.
 
 ## 16. Final End-to-End Release Gate
