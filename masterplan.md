@@ -528,7 +528,9 @@ GPU work must remain bounded, reviewed, opt-in, and safe for a display GPU.
 - [x] Document known limitations and unsupported configurations. Evidence:
       README GPU status plus explicit unimplemented recovery guarantees in the
       format/automation/recovery document.
-- [ ] Document how to reproduce the reference PCU and all verification results.
+- [x] Document how to reproduce the reference PCU and all verification results.
+      Evidence: `docs/REPRODUCE_REFERENCE_PCU.md` and the release-gated
+      `flash-photonic`/`deterministic-trace` suites.
 - [ ] Remove stale probe-era and marketing language.
 - [ ] Add release notes tied to verified behavior, not commit count.
 

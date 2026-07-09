@@ -88,4 +88,5 @@ evidence/             master-plan ledger and release evidence index
 The complete implementation and acceptance contract is in `masterplan.md`.
 Unchecked items are incomplete regardless of whether a narrower test passes.
 Project format, model evidence, agent/MCP contracts, and recovery behavior are
-documented in `docs/FORMATS_AUTOMATION_RECOVERY.md`.
+documented in `docs/FORMATS_AUTOMATION_RECOVERY.md`. Reference PCU reproduction
+steps are documented in `docs/REPRODUCE_REFERENCE_PCU.md`.
