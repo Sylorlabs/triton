@@ -4,7 +4,8 @@ Triton is an experimental, pure-Zag CAD and deterministic simulation environment
 for spatial balanced-ternary optical processor designs. It currently provides a
 native X11 workbench, CPU reference renderer, voxel design-rule engine, 3D
 waveguide router, symbolic/phase-aware simulator, project persistence, undo/redo,
-and native line/MCP automation.
+a continuous background optimizer that proposes equivalence-verified
+simplifications, and native line/MCP automation.
 Flash hardware IR (`.fir`) can be imported as a real routed photonic design and
 verified against the compiler-recorded balanced-ternary results.
 
@@ -69,6 +70,26 @@ never runs in the default build or viewport. GPU memory access and command
 submission are separate explicit verification modes. They are not certified on
 the current single-GPU display system, and no GPU performance claim is made.
 
+## Continuous optimizer (Photon Solver)
+
+Triton runs a lightweight background optimizer that continuously searches for
+mathematically-equivalent, cheaper ways to compute the same optical result — it
+changes how a design computes, never what it computes. Every proposal is verified
+output-equivalent against the reference simulation (identical detector trits at
+every symbol over a bounded horizon) before it is ever shown, and re-verified
+again at apply time.
+
+Two rewrite families are implemented today: dead-path elimination (removing
+components that cannot affect any detector) and constant-op collapse (folding a
+constant-driven multiply or nand chamber to a negate). The optimizer surfaces a
+single Optimizer button whose count updates silently; its panel offers Apply,
+Ignore, and Details with the measured cost delta. Auto-apply is a Settings toggle
+that is off by default. Applying an optimization — manually or automatically — is
+a single undo and is written to the audit log with the rewrite family and measured
+gain. The optimizer runs off the interaction path and never mutates a project
+while auto-apply is off. Behavior is covered by the `optimizer` and `optimizer-ui`
+safe-gate suites.
+
 ## Project structure
 
 ```text
@@ -77,6 +98,7 @@ src/device_model.zag  versioned physical inputs and provenance classes
 src/scene.zag         components, ports, occupancy, and optical graph
 src/routing.zag       deterministic 3D waveguide router
 src/sim.zag           balanced-ternary symbolic/physical simulation
+src/optimizer.zag     continuous equivalence-verified optimizer (Section 20)
 src/editops.zag       transactional edits, undo/redo, and project format
 src/viewport.zag      CPU 3D reference renderer and picking
 src/x11.zag           direct X11 wire-protocol client
