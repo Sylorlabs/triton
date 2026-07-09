@@ -1,0 +1,36 @@
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn pixel_at(a: *App, x: i32, y: i32) i64 {
+    return a.*.f.px.data[y * a.*.f.w + x];
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(960, 640);
+    app_action_demo(a);
+    a.*.frame_ms = 17;
+    a.*.sim.*.symbol = 23;
+    app_frame(a, 0.016);
+    let vp: Rect = zone_center(a);
+    let bg: i64 = pixel_at(a, vp.x + vp.w / 2, vp.y + 8);
+    let panel: i64 = pixel_at(a, vp.x + 10, vp.y + 10);
+    let changed: i32 = 0;
+    let yy: i32 = vp.y + 12;
+    while (yy < vp.y + 32) {
+        let xx: i32 = vp.x + 12;
+        while (xx < vp.x + 160) {
+            if (pixel_at(a, xx, yy) != panel) { changed = changed + 1; }
+            xx = xx + 1;
+        }
+        yy = yy + 1;
+    }
+    check("frame timing overlay panel renders", panel != bg, &failures);
+    check("frame timing overlay text renders", changed > 40, &failures);
+    if (failures == 0) { _zag_println("FRAME OVERLAY: ALL PASS"); return 0; }
+    _zag_println("FRAME OVERLAY: FAILURES"); return 1;
+}

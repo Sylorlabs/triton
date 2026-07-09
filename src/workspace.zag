@@ -880,8 +880,33 @@ fn draw_viewport(a: *App) void {
         line2d(f, gx, gy, gx, gy - 14, rgb(120, 200, 120));
     }
 
+    draw_frame_timing_overlay(a, vp);
+
     fb_clip_reset(f);
     rect_outline(f, vp.x, vp.y, vp.w, vp.h, th_outline());
+}
+
+fn draw_frame_timing_overlay(a: *App, vp: Rect) void {
+    let f: *FB = &a.*.f;
+    let x: i32 = vp.x + 8;
+    let y: i32 = vp.y + 8;
+    let w: i32 = 176;
+    let h: i32 = 34;
+    blend_rect(f, x, y, w, h, rgb(6, 8, 12), 176);
+    rect_outline(f, x, y, w, h, th_outline());
+    draw_text(f, x + 6, y + 7, "frame ", th_text_dim());
+    let tx: i32 = x + 6 + text_w("frame ");
+    let tx2: i32 = tx + draw_int(f, tx, y + 7, a.*.frame, th_text());
+    draw_text(f, tx2, y + 7, "  ", th_text_dim());
+    let tx3: i32 = tx2 + text_w("  ");
+    let tx4: i32 = tx3 + draw_int(f, tx3, y + 7, a.*.frame_ms, th_text());
+    draw_text(f, tx4, y + 7, " ms", th_text_dim());
+    draw_text(f, x + 6, y + 20, "symbol ", th_text_dim());
+    let sx: i32 = x + 6 + text_w("symbol ");
+    let sx2: i32 = sx + draw_int(f, sx, y + 20, a.*.sim.*.symbol, th_text());
+    let run: []u8 = " paused";
+    if (a.*.sim.*.playing) { run = " running"; }
+    draw_text(f, sx2, y + 20, run, th_text_dim());
 }
 
 // ── modals ────────────────────────────────────────────────────────────────────

@@ -1041,6 +1041,11 @@ Checklist:
 12. Add visual QA checklist before every release.
 ```
 
+Priority evidence:
+
+* [x] Add frame timing overlay. Evidence: `draw_frame_timing_overlay` in
+  `src/workspace.zag` and `frame-overlay`.
+
 The standard should be: **Triton looks like a designer and CAD engineer built it together**, while the engine underneath stays mathematically accurate.
 ## 19. Flash Language and Full Agent Control
 
