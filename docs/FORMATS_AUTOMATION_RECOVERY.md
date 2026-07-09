@@ -80,9 +80,10 @@ set, confines open/save/render/export/import paths and rejects lexical parent
 traversal with `E_PATH_OUTSIDE_ROOT`.
 
 The MCP server uses Content-Length framing capped by `src/limits.zag`, negotiates
-MCP protocol `2024-11-05`, and advertises `triton_mutate` for keyed,
-revision-checked mutations. MCP, CLI, scripts, and `zagctl` converge on the same
-native agent dispatcher.
+MCP protocol `2024-11-05`, and advertises `triton_mutate` plus specialized
+mutation tools with required `idempotency_key` and `expected_revision` schema
+fields. MCP, CLI, scripts, and `zagctl` converge on the same native agent
+dispatcher.
 
 ## Audit and recovery files
 

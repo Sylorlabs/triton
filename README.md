@@ -38,8 +38,10 @@ to `.triton/audit.log` (or `TRITON_AUDIT`).
 Project mutations use `request <idempotency-key> <expected-revision> <command>`.
 `zagctl` creates this envelope automatically using the current revision; set
 `TRITON_IDEMPOTENCY` to a stable caller key when retrying. MCP clients use the
-advertised `triton_mutate` tool. Successful results include revision,
-idempotency key, affected ID, and undo token. Unkeyed mutations are rejected.
+advertised `triton_mutate` tool or a specialized mutation tool whose schema
+requires `idempotency_key` and `expected_revision`. Successful results include
+revision, idempotency key, affected ID, and undo token. Unkeyed mutations are
+rejected.
 
 Set `ZNC=/absolute/path/to/znc` to override the default
 `../zag/zag-poc/znc`. The current environment and exact compiler hash used for

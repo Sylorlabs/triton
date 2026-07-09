@@ -348,8 +348,13 @@ The user and agent must be able to perform the same core project operations.
 - [x] Run two-client revision-conflict and recovery tests. Evidence: a stale
       client is rejected without mutation, then succeeds after refreshing to
       the committed revision in `agent-revision-conflict`.
-- [ ] Run an agent-only end-to-end PCU construction and verification test.
-- [ ] Compare the agent-created project with the canonical expected artifact.
+- [x] Run an agent-only end-to-end PCU construction and verification test.
+      Evidence: `flash-photonic` compiles the maintained Flash source, imports
+      FIR through `./zagpa --agent --once 'request ... flash import ...'`, then
+      runs `flash verify` with zero detector mismatches.
+- [x] Compare the agent-created project with the canonical expected artifact.
+      Evidence: `flash-photonic` byte-compares the generated project and
+      deterministic exports against `examples/flash_photonic_massive.*`.
 - [ ] Test crash recovery during a multi-operation transaction.
 
 ## 9. Phase F — UI and True 3D CAD Workflow
