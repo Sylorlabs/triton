@@ -157,7 +157,9 @@ hardware, kernel, firmware, driver, display role, and date.
 - [ ] Distinguish measured, literature-derived, simulated, user-entered,
       illustrative, and unknown values.
 - [ ] Validate dimensions and units at load time.
-- [ ] Reject incompatible device-model versions with an actionable diagnostic.
+- [x] Reject incompatible device-model versions with an actionable diagnostic.
+      Evidence: `device-model-version` verifies opening a project with device
+      model schema `99` returns stable `E_MODEL_VERSION ... expected 1`.
 - [ ] Allow projects to pin and migrate model versions explicitly.
 - [ ] Display provenance and uncertainty in the inspector.
 

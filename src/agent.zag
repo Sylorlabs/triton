@@ -788,6 +788,32 @@ fn agent_diagnostics(a: *App, path: []u8) void {
     agent_ok1("diagnostics written");
 }
 
+fn agent_check_device_model_version(path: []u8) bool {
+    let raw: []u8 = _zag_read_file(path);
+    if (raw.len < 5 || _zag_strcmp(raw[0..5], "zpa 2") != 1) { return true; }
+    let pos: i32 = 0;
+    while (pos < raw.len) {
+        let eol: i32 = pos;
+        while (eol < raw.len && (raw[eol] as i32) != 10) { eol = eol + 1; }
+        let line: []u8 = raw[pos..eol];
+        pos = eol + 1;
+        if (line.len > 2 && (line[0] as i32) == 'm' && (line[1] as i32) == 32) {
+            let i: i32 = 2;
+            while (i < line.len && (line[i] as i32) == 32) { i = i + 1; }
+            let start: i32 = i;
+            while (i < line.len && (line[i] as i32) != 32) { i = i + 1; }
+            let schema: i64 = _zag_str_to_i64(line[start..i]);
+            if (schema != 1) {
+                let msg: []u8 = _zag_str_concat("E_MODEL_VERSION unsupported device model schema ", _zag_i64_to_str(schema));
+                agent_err(_zag_str_concat(msg, " expected 1"));
+                return false;
+            }
+            return true;
+        }
+    }
+    return true;
+}
+
 fn agent_test(cmd: []u8) void {
     let rc: i32 = 0;
     if (_zag_strcmp(cmd, "engine") == 1) {
@@ -1020,6 +1046,7 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
         let path: []u8 = session_zpa_path();
         if (toks.*.len >= 2) { path = tok_slice(line, list.get[Tok](toks, 1)); }
         if (!agent_path_allowed(path)) { return; }
+        if (!agent_check_device_model_version(path)) { return; }
         if (design_load(a.*.scene, path)) {
             if (_zag_strcmp(path, session_zpa_path()) == 1) {
                 session_sync_journal(a);

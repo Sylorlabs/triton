@@ -17,6 +17,7 @@ is the only GPU and drives the display.
 | B.derived-timing | pass | `changing device model changes derived timing without source edit` | Runtime model-rate change altered compiled symbol clock | Add dimensional property coverage |
 | B.incomplete-model | pass | `incomplete model cannot silently advance verified simulation` | Missing group index sets `model_ok=false` and blocks stepping | Expose complete diagnostics in agent/UI |
 | B.model-roundtrip | pass | `roundtrip: device model version pinned`; `physical model values preserved` | Project format v2 preserved schema and physical inputs | Add corruption/migration fixtures |
+| B.model-version-diagnostic | pass | `agent_check_device_model_version`; `device-model-version` | Agent open rejects incompatible device-model schema with stable `E_MODEL_VERSION ... expected 1` diagnostic | Extend to future schema migration hints |
 | B.claim-cleanup | pass | `README.md`; `tools/verify.zag` unsupported-claim audit | README separates illustrative, simulated, measured, and unknown evidence | Extend audit allowlist and generated evidence |
 | E.native-automation | pass | native `--agent`, `--mcp`, `zagctl`; legacy Python client removed | Supported automation path is compiled Zag | Add capability enforcement |
 | E.flash-fir-import | pass | `flash import`; `src/flash_ir.zag`; `./verify.sh safe` | Flash FIR v1 maps to production components/routes without executing host code | Add UI import dialog and trace panel |
