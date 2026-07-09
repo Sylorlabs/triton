@@ -595,6 +595,22 @@ fn draw_toolbar(a: *App) void {
             let pos7: []u8 = _zag_str_concat(pos6, fmt_i((c.rot * 90) as i64));
             draw_text(f, x, y, pos7, th_text_dim());
             y = y + 14;
+            // exact dimensions (voxels)
+            let ext: Vox = comp_ext(c);
+            let dim: []u8 = _zag_str_concat("size ", fmt_i(ext.x as i64));
+            let dim2: []u8 = _zag_str_concat(_zag_str_concat(dim, "x"), fmt_i(ext.y as i64));
+            let dim3: []u8 = _zag_str_concat(_zag_str_concat(dim2, "x"), fmt_i(ext.z as i64));
+            draw_text(f, x, y, _zag_str_concat(dim3, " vox"), th_text_dim());
+            y = y + 14;
+            // live output beam state (updates as the simulation steps)
+            if (c.kind == Kind.Emitter || c.kind == Kind.Chamber || c.kind == Kind.Detector) {
+                let ot: i32 = sim_history(a.*.sim, c.id, 0);
+                draw_text(f, x, y, "output", th_text_dim());
+                fill_rect(f, x + 46, y, 9, 9, trit_color(ot));
+                rect_outline(f, x + 46, y, 9, 9, trit_rim(ot));
+                draw_text(f, x + 60, y, trit_glyph(ot), th_text());
+                y = y + 14;
+            }
             let pitch: []u8 = "pitch Unknown";
             if (a.*.scene.*.model.pitch_nm.known) {
                 pitch = _zag_str_concat(_zag_str_concat("pitch ", fmt_i(a.*.scene.*.model.pitch_nm.value as i64)), " nm (Illustrative)");

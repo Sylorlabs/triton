@@ -791,14 +791,18 @@ UI interaction must never wait for engine simulation unless the user explicitly 
 
 Since Triton is an engine CAD, the UI cannot just look nice. It has to communicate truth.
 
-* [ ] Show exact coordinates for selected objects.
-* [ ] Show exact dimensions for parts and beams.
-* [ ] Show beam state clearly:
+* [x] Show exact coordinates for selected objects. Evidence: inspector cell
+  x/y/z + rotation readout (`draw_toolbar`); rendered in `x11-captures`.
+* [x] Show exact dimensions for parts and beams. Evidence: inspector "size WxHxD
+  vox" for parts and "length nm" for guides (`draw_toolbar`); `x11-captures`.
+* [x] Show beam state clearly: Evidence: inspector live "output" trit swatch via
+  `sel_output_trit`; `inspector` gate.
 
-  * [ ] Off
-  * [ ] Positive
-  * [ ] Negative
-  * [ ] invalid/conflicting
+  * [x] Off. Evidence: `trit_color`/`trit_glyph` render the 0 state; `inspector`.
+  * [x] Positive. Evidence: +1 swatch/glyph; `inspector` gate.
+  * [x] Negative. Evidence: -1 swatch/glyph; `inspector` gate.
+  * [x] invalid/conflicting. Evidence: `sel_output_trit` returns `signal_unknown`
+    for non-source parts, rendered with the invalid glyph; `inspector` gate.
 * [ ] Show beam orientation by geometry, not just color.
 * [ ] Show depth/layer/height clearly.
 * [ ] Show snapping targets before placement.
@@ -933,18 +937,18 @@ The current library panel should become a clean component browser.
 
 Inspector should feel like a real properties editor.
 
-* [ ] Show selected object name/type.
-* [ ] Show transform:
+* [x] Show selected object name/type. Evidence: inspector name + kind (`draw_toolbar`); `x11-captures`.
+* [x] Show transform: Evidence: inspector cell/rotation/size block; `x11-captures`.
 
-  * [ ] position x/y/z
-  * [ ] rotation
-  * [ ] scale/dimensions
+  * [x] position x/y/z. Evidence: inspector "cell x, y, z"; `x11-captures`.
+  * [x] rotation. Evidence: inspector "rot" degrees; `x11-captures`.
+  * [x] scale/dimensions. Evidence: inspector "size WxHxD vox"; `x11-captures`.
 * [ ] Show engine-specific properties:
 
-  * [ ] beam state
+  * [x] beam state. Evidence: inspector live output trit via `sel_output_trit`; `inspector` gate.
   * [ ] port states
-  * [ ] material/model
-  * [ ] timing delay
+  * [x] material/model. Evidence: inspector "pitch nm (Illustrative)" model readout; `x11-captures`.
+  * [x] timing delay. Evidence: inspector guide "delay fs / symbols" (`draw_toolbar`); `x11-captures`.
   * [ ] simulation status
 * [ ] Use numeric fields with step controls.
 * [ ] Support precise typing.
@@ -1070,7 +1074,9 @@ Checklist:
 * [ ] A user can tell whether a beam is `-1`, `0`, or `+1` instantly.
 * [ ] A user can tell what object is selected instantly.
 * [ ] A user can tell why an object is invalid.
-* [ ] A user can inspect exact coordinates and beam state.
+* [x] A user can inspect exact coordinates and beam state. Evidence: inspector
+  cell/size readout plus the live output trit (`sel_output_trit`); `inspector`
+  gate and `x11-captures`.
 * [ ] A user can undo every edit.
 * [ ] A user can recover from mistakes without restarting.
 

@@ -502,6 +502,21 @@ fn app_delete_selection(a: *App) void {
     sel_clear(a);
 }
 
+// Current output trit of the primary-selected active component (emitter/chamber/
+// detector), or signal_unknown() when nothing live is selected. Drives the
+// inspector's live beam-state readout.
+fn sel_output_trit(a: *App) i32 {
+    let pid: i32 = sel_primary(a);
+    if (pid < 0) { return signal_unknown(); }
+    let ci: i32 = scene_comp_index(a.*.scene, pid);
+    if (ci < 0) { return signal_unknown(); }
+    let k: Kind = a.*.scene.*.comps.data[ci].kind;
+    if (k == Kind.Emitter || k == Kind.Chamber || k == Kind.Detector) {
+        return sim_history(a.*.sim, pid, 0);
+    }
+    return signal_unknown();
+}
+
 // Copy the current component selection into the clipboard (snapshots only).
 fn app_copy(a: *App) void {
     a.*.clipboard.len = 0;
