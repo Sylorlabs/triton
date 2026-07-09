@@ -1,0 +1,67 @@
+// shortcuts_test.zag — drives the real frame loop headlessly to prove the core
+// editor keyboard shortcuts (Masterplan Section 3.6 / Phase F).
+
+@import("../std/list.zag") as list
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn key1(a: *App, code: i32, mods: i32) void {
+    a.*.inp.keys.len = 0;
+    list.push[i32](&a.*.inp.keys, code);
+    a.*.inp.mods = mods;
+    app_frame(a, 0.016);
+    a.*.inp.keys.len = 0;
+    a.*.inp.mods = 0;
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1024, 640);
+    let plate: i32 = scene_place(a.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    let e1: i32 = scene_place(a.*.scene, Kind.Emitter, vox(1, 1, 2), 0);
+
+    a.*.tool = tool_route();
+    key1(a, 'q' as i32, 0);
+    check("Q selects the select tool", a.*.tool == tool_select(), &failures);
+    key1(a, 'e' as i32, 0);
+    check("E selects the route tool", a.*.tool == tool_route(), &failures);
+    key1(a, 'q' as i32, 0);
+
+    let r0: i32 = a.*.ghost_rot;
+    key1(a, 'r' as i32, 0);
+    check("R rotates the placement ghost", a.*.ghost_rot != r0, &failures);
+
+    sel_set(a, e1);
+    key1(a, 'g' as i32, 0);
+    check("G starts a move", a.*.moving, &failures);
+    key1(a, key_esc(), 0);
+
+    sel_set(a, e1);
+    key1(a, 'f' as i32, 0);
+    check("F frames the selection (camera targets it)", a.*.cam.target.x == 1.5, &failures);
+
+    sel_set(a, plate);
+    key1(a, 'd' as i32, 1);   // Shift+D → arms placing a copy of the selected kind
+    check("Shift+D starts duplicating the selection",
+        a.*.tool == tool_place_base() + kind_index(Kind.Plate), &failures);
+    a.*.tool = tool_select();
+
+    sel_set(a, e1);
+    let n1: i32 = a.*.scene.*.comps.len;
+    key1(a, 'x' as i32, 0);
+    check("X deletes the selection", a.*.scene.*.comps.len == n1 - 1, &failures);
+
+    let p0: bool = a.*.sim.*.playing;
+    key1(a, key_space(), 0);
+    check("Space runs the simulation", a.*.sim.*.playing != p0, &failures);
+    let p1: bool = a.*.sim.*.playing;
+    key1(a, key_space(), 0);
+    check("Space pauses the simulation", a.*.sim.*.playing != p1, &failures);
+
+    if (failures == 0) { _zag_println("SHORTCUTS: ALL PASS"); return 0; }
+    _zag_println("SHORTCUTS: FAILURES"); return 1;
+}

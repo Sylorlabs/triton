@@ -50,6 +50,181 @@ fn app_action(a: *App, code: i32) void {
     }
     if (code == 30) { a.*.modal = modal_keys(); }
     if (code == 31) { app_action_demo(a); }
+    if (code == 40) { a.*.tool = tool_select(); }
+    if (code == 41) { a.*.tool = tool_route(); a.*.route_c = 0 - 1; }
+    if (code == 42) { a.*.sim.*.playing = !a.*.sim.*.playing; }
+    if (code == 43) { a.*.opt_open = true; a.*.settings_open = false; }
+    if (code == 44) { a.*.settings_open = true; a.*.opt_open = false; }
+    if (code == 45) { a.*.palette_open = true; a.*.palette_text.len = 0; a.*.palette_sel = 0; }
+    if (code >= 50 && code < 50 + kind_count()) { a.*.tool = tool_place_base() + (code - 50); }
+}
+
+// ── command palette (Section 3.6) ─────────────────────────────────────────────
+struct PCmd {
+    label: []u8,
+    hint: []u8,
+    code: i32,
+}
+
+fn palette_commands(out: *list.ArrayList[PCmd]) void {
+    out.*.len = 0;
+    list.push[PCmd](out, PCmd{ .label = "New Project", .hint = "Ctrl+N", .code = 1 });
+    list.push[PCmd](out, PCmd{ .label = "Open Project...", .hint = "Ctrl+O", .code = 2 });
+    list.push[PCmd](out, PCmd{ .label = "Save", .hint = "Ctrl+S", .code = 3 });
+    list.push[PCmd](out, PCmd{ .label = "Save As...", .hint = "Ctrl+Shift+S", .code = 4 });
+    list.push[PCmd](out, PCmd{ .label = "Undo", .hint = "Ctrl+Z", .code = 10 });
+    list.push[PCmd](out, PCmd{ .label = "Redo", .hint = "Ctrl+Y", .code = 11 });
+    list.push[PCmd](out, PCmd{ .label = "Duplicate Selection", .hint = "Shift+D", .code = 12 });
+    list.push[PCmd](out, PCmd{ .label = "Delete Selection", .hint = "X", .code = 13 });
+    list.push[PCmd](out, PCmd{ .label = "Deselect All", .hint = "Esc", .code = 14 });
+    list.push[PCmd](out, PCmd{ .label = "Frame Selected", .hint = "F", .code = 20 });
+    list.push[PCmd](out, PCmd{ .label = "Frame All", .hint = "Home", .code = 21 });
+    list.push[PCmd](out, PCmd{ .label = "View: Top", .hint = "", .code = 22 });
+    list.push[PCmd](out, PCmd{ .label = "View: Front", .hint = "", .code = 23 });
+    list.push[PCmd](out, PCmd{ .label = "View: Right", .hint = "", .code = 24 });
+    list.push[PCmd](out, PCmd{ .label = "View: Perspective", .hint = "", .code = 25 });
+    list.push[PCmd](out, PCmd{ .label = "Tool: Select", .hint = "Q", .code = 40 });
+    list.push[PCmd](out, PCmd{ .label = "Tool: Route Waveguide", .hint = "E", .code = 41 });
+    list.push[PCmd](out, PCmd{ .label = "Toggle Simulation", .hint = "Space", .code = 42 });
+    list.push[PCmd](out, PCmd{ .label = "Open Optimizer", .hint = "", .code = 43 });
+    list.push[PCmd](out, PCmd{ .label = "Open Settings", .hint = "", .code = 44 });
+    let ki: i32 = 0;
+    while (ki < kind_count()) {
+        list.push[PCmd](out, PCmd{ .label = _zag_str_concat("Place: ", kind_name(kind_at(ki))),
+                                   .hint = "", .code = 50 + ki });
+        ki = ki + 1;
+    }
+    list.push[PCmd](out, PCmd{ .label = "Load Demo Design", .hint = "F1", .code = 31 });
+    list.push[PCmd](out, PCmd{ .label = "Keyboard Shortcuts", .hint = "", .code = 30 });
+}
+
+fn ascii_lower(c: u8) u8 {
+    if (c >= 65 && c <= 90) { return c + 32; }
+    return c;
+}
+
+// Case-insensitive substring match; an empty query matches everything.
+fn pcmd_match(label: []u8, q: []u8) bool {
+    if (q.len == 0) { return true; }
+    let i: i32 = 0;
+    while (i + q.len <= label.len) {
+        let ok: bool = true;
+        let j: i32 = 0;
+        while (j < q.len) {
+            if (ascii_lower(label[i + j]) != ascii_lower(q[j])) { ok = false; }
+            j = j + 1;
+        }
+        if (ok) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn palette_filtered(a: *App, out: *list.ArrayList[PCmd]) void {
+    let all: list.ArrayList[PCmd] = list.make[PCmd](40);
+    palette_commands(&all);
+    out.*.len = 0;
+    let q: []u8 = a.*.palette_text.data[0..a.*.palette_text.len];
+    let i: i32 = 0;
+    while (i < all.len) {
+        if (pcmd_match(all.data[i].label, q)) { list.push[PCmd](out, all.data[i]); }
+        i = i + 1;
+    }
+    list.free[PCmd](&all);
+}
+
+// Execute the highlighted command in the current filtered list.
+fn app_palette_exec(a: *App) void {
+    let filt: list.ArrayList[PCmd] = list.make[PCmd](40);
+    palette_filtered(a, &filt);
+    if (filt.len > 0) {
+        let sel: i32 = a.*.palette_sel;
+        if (sel < 0) { sel = 0; }
+        if (sel >= filt.len) { sel = filt.len - 1; }
+        let code: i32 = filt.data[sel].code;
+        a.*.palette_open = false;
+        app_action(a, code);
+    }
+    list.free[PCmd](&filt);
+}
+
+// Palette key handling (owns the keyboard while open).
+fn app_palette_keys(a: *App) void {
+    let inp: *Input = &a.*.inp;
+    let i: i32 = 0;
+    while (i < inp.*.keys.len) {
+        let k: i32 = list.get[i32](inp.*.keys, i);
+        if (k == key_esc()) { a.*.palette_open = false; return; }
+        else if (k == key_enter()) { app_palette_exec(a); return; }
+        else if (k == 17) { if (a.*.palette_sel > 0) { a.*.palette_sel = a.*.palette_sel - 1; } }
+        else if (k == 18) { a.*.palette_sel = a.*.palette_sel + 1; }
+        else if (k == key_backspace()) {
+            if (a.*.palette_text.len > 0) { a.*.palette_text.len = a.*.palette_text.len - 1; }
+            a.*.palette_sel = 0;
+        } else if (k >= 32 && k < 127 && a.*.palette_text.len < 40) {
+            list.push[u8](&a.*.palette_text, k as u8);
+            a.*.palette_sel = 0;
+        }
+        i = i + 1;
+    }
+}
+
+fn draw_palette(a: *App) void {
+    if (!a.*.palette_open) { return; }
+    let f: *FB = &a.*.f;
+    let inp: *Input = &a.*.inp;
+    let cap: i32 = inp.*.capture;
+    inp.*.capture = 0;
+
+    let pw: i32 = 440;
+    let px: i32 = (a.*.inp.w - pw) / 2;
+    if (px < 8) { px = 8; }
+    let py: i32 = 84;
+
+    let filt: list.ArrayList[PCmd] = list.make[PCmd](40);
+    palette_filtered(a, &filt);
+    if (a.*.palette_sel >= filt.len) { a.*.palette_sel = filt.len - 1; }
+    if (a.*.palette_sel < 0) { a.*.palette_sel = 0; }
+    let shown: i32 = filt.len;
+    if (shown > 9) { shown = 9; }
+    let row_h: i32 = 20;
+    let ph: i32 = 30 + shown * row_h + 6;
+
+    fill_rect(f, px, py, pw, ph, th_panel());
+    rect_outline(f, px, py, pw, ph, th_outline());
+    // input row
+    fill_rect(f, px + 1, py + 1, pw - 2, 26, th_panel_alt());
+    if (a.*.palette_text.len > 0) {
+        draw_text(f, px + 10, py + 9, a.*.palette_text.data[0..a.*.palette_text.len], th_text());
+    } else {
+        draw_text(f, px + 10, py + 9, "Type a command...", th_text_dim());
+    }
+
+    let y: i32 = py + 30;
+    let idx: i32 = 0;
+    while (idx < shown) {
+        let c: PCmd = filt.data[idx];
+        let row: Rect = rect(px + 2, y, pw - 4, row_h);
+        let hov: bool = rect_has(row, inp.*.mx, inp.*.my);
+        if (idx == a.*.palette_sel || hov) { fill_rect(f, row.x, row.y, row.w, row.h, th_accent()); }
+        draw_text(f, row.x + 8, y + 6, c.label, th_text());
+        if (c.hint.len > 0) {
+            draw_text(f, row.x + row.w - text_w(c.hint) - 8, y + 6, c.hint, th_text_dim());
+        }
+        if (hov && btn_released(inp, 0)) {
+            a.*.palette_sel = idx;
+            app_palette_exec(a);
+        }
+        y = y + row_h;
+        idx = idx + 1;
+    }
+    list.free[PCmd](&filt);
+
+    if (btn_pressed(inp, 0)) {
+        let box: Rect = rect(px, py, pw, ph);
+        if (!rect_has(box, inp.*.mx, inp.*.my)) { a.*.palette_open = false; }
+    }
+    inp.*.capture = cap;
 }
 
 // small demo design (also used by --smoke); placed through the normal APIs
@@ -91,6 +266,8 @@ fn menu_items(m: i32, out: *list.ArrayList[MenuItem]) void {
         list.push[MenuItem](out, MenuItem{ .label = "Duplicate", .hint = "Shift+D", .code = 12 });
         list.push[MenuItem](out, MenuItem{ .label = "Delete", .hint = "X", .code = 13 });
         list.push[MenuItem](out, MenuItem{ .label = "Deselect", .hint = "Esc", .code = 14 });
+        list.push[MenuItem](out, MenuItem{ .label = "", .hint = "", .code = 0 });
+        list.push[MenuItem](out, MenuItem{ .label = "Command Palette", .hint = "Ctrl+K", .code = 45 });
     }
     if (m == 2) {
         list.push[MenuItem](out, MenuItem{ .label = "Frame Selected", .hint = "F", .code = 20 });
@@ -1233,12 +1410,12 @@ fn app_frame(a: *App, dt: f64) void {
     let t0: i64 = _zag_clock_monotonic_ms();
 
     a.*.inp.capture = 0;
-    // an open modal, menu, or optimizer/settings panel owns the pointer:
-    // panels underneath go inert
-    if (a.*.modal != modal_none() || a.*.menu >= 0 ||
+    // an open modal, menu, command palette, or optimizer/settings panel owns the
+    // pointer: panels underneath go inert
+    if (a.*.modal != modal_none() || a.*.menu >= 0 || a.*.palette_open ||
         a.*.opt_open || a.*.settings_open) { a.*.inp.capture = 4; }
     if (a.*.inp.capture == 0) { app_splitters(a); }
-    app_keys(a);
+    if (a.*.palette_open) { app_palette_keys(a); } else { app_keys(a); }
     if (a.*.inp.capture != 4) { app_viewport_input(a); }
 
     // Incremental sim patch: small edits keep symbol time and in-flight state;
@@ -1253,7 +1430,7 @@ fn app_frame(a: *App, dt: f64) void {
     // project, so it is a pure runtime observer.
     if (a.*.frame % 60 == 0 && !a.*.moving && !a.*.cam_drag && a.*.grab == 0 &&
         a.*.modal == modal_none() && a.*.menu < 0 && !a.*.sim.*.playing &&
-        !a.*.opt_open && !a.*.settings_open) {
+        !a.*.opt_open && !a.*.settings_open && !a.*.palette_open) {
         let _oc: bool = opt_engine_refresh(a.*.opt, a.*.scene);
         if (a.*.opt.*.auto_apply && a.*.opt.*.has_pending) {
             opt_apply_gui(a);   // journaled + audited, single-undo
@@ -1271,6 +1448,7 @@ fn app_frame(a: *App, dt: f64) void {
     draw_settings_panel(a);
     draw_opt_panel(a);
     draw_modal(a);
+    draw_palette(a);
 
     a.*.pmx = a.*.inp.mx;
     a.*.pmy = a.*.inp.my;

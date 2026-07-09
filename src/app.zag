@@ -106,6 +106,9 @@ struct App {
     opt_open: bool,         // Optimizer proposal panel open
     opt_details: bool,      // proposal details expanded
     settings_open: bool,    // Settings panel open
+    palette_open: bool,     // command palette open
+    palette_text: list.ArrayList[u8],
+    palette_sel: i32,       // highlighted row in the filtered command list
 }
 
 fn app_new(w: i32, h: i32) *App {
@@ -170,6 +173,9 @@ fn app_new(w: i32, h: i32) *App {
         .opt_open = false,
         .opt_details = false,
         .settings_open = false,
+        .palette_open = false,
+        .palette_text = list.make[u8](32),
+        .palette_sel = 0,
     });
     a.*.inp.w = w;
     a.*.inp.h = h;
@@ -756,6 +762,11 @@ fn app_keys(a: *App) void {
     }
 
     if (ctrl_down(inp)) {
+        if (key_hit(inp, 'k' as i32) || key_hit(inp, 'p' as i32)) {
+            a.*.palette_open = true;
+            a.*.palette_text.len = 0;
+            a.*.palette_sel = 0;
+        }
         if (key_hit(inp, 'n' as i32)) { app_new_design(a); }
         if (key_hit(inp, 'o' as i32)) { app_show_open(a); }
         if (key_hit(inp, 's' as i32)) {

@@ -22,6 +22,7 @@ probe/frame_diff_test
 probe/optimizer_test
 probe/opt_ui_test
 probe/opt_ui_shot
+probe/palette_test
 probe/gpu_test
 probe/gpu_submit_test
 probe/gpu_compute_test
@@ -36,3 +37,4 @@ probe/gpu_fill_test
 tools/verify
 zagpa.baseline
 probe/*.baseline
+probe/shortcuts_test

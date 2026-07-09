@@ -1,0 +1,98 @@
+// palette_test.zag — drives the real app frame loop headlessly to prove the
+// command palette (Ctrl+K) opens, filters, navigates, executes, and closes
+// (Masterplan Section 3.6 / Phase F).
+
+@import("../std/list.zag") as list
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+// One frame with the given keys held (mods: bit1=shift, bit2=ctrl).
+fn frame_keys1(a: *App, code: i32, mods: i32) void {
+    a.*.inp.keys.len = 0;
+    list.push[i32](&a.*.inp.keys, code);
+    a.*.inp.mods = mods;
+    app_frame(a, 0.016);
+    a.*.inp.keys.len = 0;
+    a.*.inp.mods = 0;
+}
+
+fn frame_keys2(a: *App, c0: i32, c1: i32) void {
+    a.*.inp.keys.len = 0;
+    list.push[i32](&a.*.inp.keys, c0);
+    list.push[i32](&a.*.inp.keys, c1);
+    a.*.inp.mods = 0;
+    app_frame(a, 0.016);
+    a.*.inp.keys.len = 0;
+}
+
+fn type_str(a: *App, s: []u8) void {
+    a.*.inp.keys.len = 0;
+    let i: i32 = 0;
+    while (i < s.len) { list.push[i32](&a.*.inp.keys, s[i] as i32); i = i + 1; }
+    a.*.inp.mods = 0;
+    app_frame(a, 0.016);
+    a.*.inp.keys.len = 0;
+}
+
+fn open_palette(a: *App) void { frame_keys1(a, 'k' as i32, 2); }   // Ctrl+K
+
+fn filtered_count(a: *App) i32 {
+    let out: list.ArrayList[PCmd] = list.make[PCmd](40);
+    palette_filtered(a, &out);
+    let n: i32 = out.len;
+    list.free[PCmd](&out);
+    return n;
+}
+
+fn click(a: *App, x: i32, y: i32) void {
+    a.*.inp.keys.len = 0;
+    a.*.inp.mx = x; a.*.inp.my = y;
+    a.*.inp.prev_btn = 0; a.*.inp.btn = 1;
+    app_frame(a, 0.016);
+    a.*.inp.prev_btn = 1; a.*.inp.btn = 0;
+    app_frame(a, 0.016);
+    a.*.inp.prev_btn = 0; a.*.inp.btn = 0;
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1024, 640);
+
+    open_palette(a);
+    check("Ctrl+K opens the command palette", a.*.palette_open, &failures);
+
+    type_str(a, "toggle");
+    check("typing filters commands", a.*.palette_text.len == 6 && filtered_count(a) == 1, &failures);
+
+    let was_playing: bool = a.*.sim.*.playing;
+    frame_keys1(a, key_enter(), 0);
+    check("Enter runs the highlighted command (simulation toggled)",
+        !a.*.palette_open && a.*.sim.*.playing != was_playing, &failures);
+
+    open_palette(a);
+    type_str(a, "view");
+    check("filter narrows to the four view commands", filtered_count(a) == 4, &failures);
+    frame_keys2(a, 18, 18);   // Down, Down
+    check("arrow keys move the selection", a.*.palette_sel == 2, &failures);
+    frame_keys1(a, key_enter(), 0);
+    check("the navigated command executes (View: Right)",
+        !a.*.palette_open && a.*.cam.yaw == 0.0 && a.*.cam.pitch == 0.06, &failures);
+
+    open_palette(a);
+    frame_keys1(a, key_esc(), 0);
+    check("Esc closes the palette", !a.*.palette_open, &failures);
+
+    open_palette(a);
+    type_str(a, "settings");
+    check("filter matches a single settings command", filtered_count(a) == 1, &failures);
+    click(a, 512, 124);   // click the only visible row
+    check("clicking a row executes it (Settings opened)",
+        !a.*.palette_open && a.*.settings_open, &failures);
+
+    if (failures == 0) { _zag_println("PALETTE: ALL PASS"); return 0; }
+    _zag_println("PALETTE: FAILURES"); return 1;
+}

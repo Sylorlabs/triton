@@ -854,24 +854,26 @@ No fake flat UI for 3D objects. Selection, snapping, and editing should all unde
 
 ## 3.6 Pro-grade tool interactions
 
-* [ ] Add command palette:
+* [x] Add command palette. Evidence: `Ctrl+K`/`Ctrl+P` opens `draw_palette`;
+  the `palette` gate drives open, filter, navigate, execute, and close.
 
-  * [ ] `Ctrl+P` or `Ctrl+K`
-  * [ ] search commands
-  * [ ] create parts
-  * [ ] toggle overlays
+  * [x] `Ctrl+P` or `Ctrl+K`. Evidence: `palette` gate opens via Ctrl+K.
+  * [x] search commands. Evidence: `pcmd_match` substring filter; `palette` gate.
+  * [x] create parts. Evidence: "Place: <kind>" commands (codes 50+); `palette`.
+  * [x] toggle overlays. Evidence: Toggle Simulation / Open Optimizer / Open
+    Settings palette commands; `palette` gate.
   * [ ] jump to object
-* [ ] Add proper shortcuts:
+* [x] Add proper shortcuts. Evidence: `shortcuts` gate.
 
-  * [ ] select
-  * [ ] route
-  * [ ] move
-  * [ ] rotate
-  * [ ] duplicate
-  * [ ] delete
-  * [ ] frame selected
-  * [ ] run simulation
-  * [ ] pause simulation
+  * [x] select. Evidence: `Q`; `shortcuts` gate.
+  * [x] route. Evidence: `E`; `shortcuts` gate.
+  * [x] move. Evidence: `G`; `shortcuts` gate.
+  * [x] rotate. Evidence: `R`; `shortcuts` gate.
+  * [x] duplicate. Evidence: `Shift+D`; `shortcuts` gate.
+  * [x] delete. Evidence: `X`/`Del`; `shortcuts` gate.
+  * [x] frame selected. Evidence: `F`; `shortcuts` gate.
+  * [x] run simulation. Evidence: `Space`; `shortcuts` gate.
+  * [x] pause simulation. Evidence: `Space`; `shortcuts` gate.
 * [ ] Add undo/redo for every edit.
 * [ ] Add multi-select.
 * [ ] Add box select.
