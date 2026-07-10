@@ -51,6 +51,7 @@ fn app_action(a: *App, code: i32) void {
         a.*.cam.pitch = 0.62;
     }
     if (code == 26) { a.*.cam.ortho = !a.*.cam.ortho; }
+    if (code == 27) { a.*.ui_scale = (a.*.ui_scale % 3) + 1; }   // cycle 1x/2x/3x
     if (code == 30) { a.*.modal = modal_keys(); }
     if (code == 31) { app_action_demo(a); }
     if (code == 40) { a.*.tool = tool_select(); }
@@ -89,6 +90,7 @@ fn palette_commands(out: *list.ArrayList[PCmd]) void {
     list.push[PCmd](out, PCmd{ .label = "View: Right", .hint = "", .code = 24 });
     list.push[PCmd](out, PCmd{ .label = "View: Perspective", .hint = "", .code = 25 });
     list.push[PCmd](out, PCmd{ .label = "View: Toggle Orthographic", .hint = "", .code = 26 });
+    list.push[PCmd](out, PCmd{ .label = "Cycle HiDPI Scale", .hint = "", .code = 27 });
     list.push[PCmd](out, PCmd{ .label = "Tool: Select", .hint = "Q", .code = 40 });
     list.push[PCmd](out, PCmd{ .label = "Tool: Route Waveguide", .hint = "E", .code = 41 });
     list.push[PCmd](out, PCmd{ .label = "Toggle Simulation", .hint = "Space", .code = 42 });
@@ -1375,7 +1377,7 @@ fn draw_settings_panel(a: *App) void {
     let pw: i32 = 236;
     let px: i32 = gr.x + gr.w - pw;
     if (px < 4) { px = 4; }
-    let pr: Rect = rect(px, menu_h(), pw, 104);
+    let pr: Rect = rect(px, menu_h(), pw, 128);
     fill_rect(f, pr.x, pr.y, pr.w, pr.h, th_panel());
     rect_outline(f, pr.x, pr.y, pr.w, pr.h, th_outline());
     draw_text(f, pr.x + 10, pr.y + 8, "Settings", th_text());
@@ -1399,6 +1401,14 @@ fn draw_settings_panel(a: *App) void {
     let gx: i32 = pr.x + pw - 62;
     gx = gx + draw_int(f, gx, y + 5, a.*.opt.*.min_gain_pct as i64, th_text_dim());
     draw_text(f, gx, y + 5, "%", th_text_dim());
+    y = y + 24;
+    draw_text(f, pr.x + 10, y + 5, "HiDPI scale", th_text_dim());
+    let s_lbl: []u8 = "1x";
+    if (a.*.ui_scale == 2) { s_lbl = "2x"; }
+    if (a.*.ui_scale == 3) { s_lbl = "3x"; }
+    if (ui_button(f, inp, rect(pr.x + pw - 62, y, 52, 18), s_lbl, a.*.ui_scale > 1)) {
+        a.*.ui_scale = (a.*.ui_scale % 3) + 1;
+    }
 
     if (btn_pressed(inp, 0) && !rect_has(pr, inp.*.mx, inp.*.my) &&
         !rect_has(gr, inp.*.mx, inp.*.my)) {

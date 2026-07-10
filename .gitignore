@@ -45,3 +45,4 @@ probe/picking_test
 probe/inspector_test
 probe/gizmo_test
 probe/outline_test
+probe/dpi_test

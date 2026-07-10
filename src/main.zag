@@ -265,6 +265,8 @@ fn run_x11() i32 {
     x11_put_frame(x, a.*.f.px.data, a.*.f.w, a.*.f.h);
     x11_pump(x);
 
+    let phys: FB = fb_new(1, 1);   // physical present buffer, used only when scaled
+
     let last_ms: i64 = _zag_clock_monotonic_ms();
     let running: bool = true;
     while (running) {
@@ -272,11 +274,15 @@ fn run_x11() i32 {
         if (x.*.should_close || a.*.quit) {
             running = false;
         } else {
-            // mirror the X input state into the app
+            // mirror the X input state into the app, mapping physical pixels to
+            // logical (HiDPI) space so the whole UI works in logical coordinates
+            let uscale: i32 = a.*.ui_scale;
+            if (uscale < 1) { uscale = 1; }
+            if (uscale > 3) { uscale = 3; }
             let inp: *Input = &a.*.inp;
             inp.*.prev_btn = inp.*.btn;
-            inp.*.mx = x.*.mx;
-            inp.*.my = x.*.my;
+            inp.*.mx = x.*.mx / uscale;
+            inp.*.my = x.*.my / uscale;
             inp.*.btn = x.*.btn;
             inp.*.wheel = x.*.wheel;
             inp.*.mods = x.*.mods;
@@ -286,8 +292,8 @@ fn run_x11() i32 {
                 list.push[i32](&inp.*.keys, list.get[i32](x.*.keys, k));
                 k = k + 1;
             }
-            inp.*.w = x.*.win_w;
-            inp.*.h = x.*.win_h;
+            inp.*.w = x.*.win_w / uscale;
+            inp.*.h = x.*.win_h / uscale;
 
             if (key_hit(inp, 290)) { app_action_demo(a); }   // F1: demo design
 
@@ -305,7 +311,13 @@ fn run_x11() i32 {
             let do_blit: bool = true;
             if (a.*.cam_drag && (a.*.frame & 1) == 1) { do_blit = false; }
             if (do_blit) {
-                x11_put_frame(x, a.*.f.px.data, a.*.f.w, a.*.f.h);
+                if (uscale > 1) {
+                    fb_resize(&phys, x.*.win_w, x.*.win_h);
+                    fb_upscale(&phys, &a.*.f, uscale);
+                    x11_put_frame(x, phys.px.data, phys.w, phys.h);
+                } else {
+                    x11_put_frame(x, a.*.f.px.data, a.*.f.w, a.*.f.h);
+                }
             }
             a.*.frame_ms = _zag_clock_monotonic_ms() - t0;
             if (a.*.title_dirty) {

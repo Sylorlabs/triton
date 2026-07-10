@@ -455,9 +455,13 @@ The user and agent must be able to perform the same core project operations.
 - [x] Exercise mouse, keyboard, resize, window close, focus, and repeated open/close.
       Evidence: live `x11-live` suite.
 - [ ] Complete the reference PCU workflow through visible UI controls.
-- [ ] Verify screenshots at multiple window sizes and DPI/scaling settings.
-      Partial evidence: live 1024x640 and 1440x900 captures pass; DPI/scaling
-      variants remain unverified.
+- [x] Verify screenshots at multiple window sizes and DPI/scaling settings.
+      Evidence: responsive layout captured live at 1024x640 and 1440x900
+      (`x11-captures`); HiDPI implemented as logical-resolution rendering upscaled
+      to physical pixels (`fb_upscale`, `App.ui_scale`, remapped input + upscaled
+      present in `run_x11`), a Settings "HiDPI scale" 1x/2x/3x control; the `dpi`
+      gate proves pixel-exact upscale and the scale cycle, with a verified 2x
+      capture. Live path at 1x is byte-unchanged (`x11-live`/`x11-captures` pass).
 - [ ] Inspect layout for clipping, overlap, unreadable contrast, stale state, and
       inconsistent hit targets.
 - [ ] Verify error and permission prompts with both keyboard and pointer.

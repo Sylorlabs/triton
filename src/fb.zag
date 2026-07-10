@@ -78,6 +78,27 @@ fn fb_resize(f: *FB, w: i32, h: i32) void {
     fb_clip_reset(f);
 }
 
+// Integer nearest-neighbor upscale of `src` into `dst` by `scale` (for HiDPI:
+// render the whole UI at a logical resolution, then upscale to physical pixels).
+// dst must be at least src.w*scale by src.h*scale.
+fn fb_upscale(dst: *FB, src: *FB, scale: i32) void {
+    let dw: i32 = src.*.w * scale;
+    let dh: i32 = src.*.h * scale;
+    if (dst.*.w < dw || dst.*.h < dh) { return; }
+    let y: i32 = 0;
+    while (y < dh) {
+        let sy: i32 = y / scale;
+        let srow: i32 = sy * src.*.w;
+        let drow: i32 = y * dst.*.w;
+        let x: i32 = 0;
+        while (x < dw) {
+            dst.*.px.data[drow + x] = src.*.px.data[srow + (x / scale)];
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+}
+
 fn fb_clip(f: *FB, x0: i32, y0: i32, x1: i32, y1: i32) void {
     f.*.cx0 = x0;
     f.*.cy0 = y0;

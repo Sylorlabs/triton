@@ -114,6 +114,7 @@ struct App {
     box_y0: i32,
     clipboard: list.ArrayList[Comp],   // copied component snapshots (copy/paste)
     hover_comp: i32,                    // component under the cursor in select mode
+    ui_scale: i32,                      // HiDPI factor (1/2/3): logical px -> physical
 }
 
 fn app_new(w: i32, h: i32) *App {
@@ -186,6 +187,7 @@ fn app_new(w: i32, h: i32) *App {
         .box_y0 = 0,
         .clipboard = list.make[Comp](8),
         .hover_comp = 0 - 1,
+        .ui_scale = 1,
     });
     a.*.inp.w = w;
     a.*.inp.h = h;
