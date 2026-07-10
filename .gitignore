@@ -44,3 +44,4 @@ probe/copypaste_test
 probe/picking_test
 probe/inspector_test
 probe/gizmo_test
+probe/outline_test

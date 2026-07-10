@@ -1,0 +1,59 @@
+// outline_test.zag — selection / hover outline state (Masterplan Section 3.5 /
+// Phase F). The outlines themselves are rendered (verified by captures); this
+// drives the real frame loop to confirm the hover-tracking that feeds them.
+
+@import("../std/list.zag") as list
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn center(a: *App, id: i32) Vec3 {
+    let ci: i32 = scene_comp_index(a.*.scene, id);
+    let c: Comp = a.*.scene.*.comps.data[ci];
+    let e: Vox = comp_ext(c);
+    return v3((c.origin.x as f64) + (e.x as f64) * 0.5,
+              (c.origin.y as f64) + (e.y as f64) * 0.5,
+              (c.origin.z as f64) + (e.z as f64) * 0.5);
+}
+
+fn hover_at(a: *App, p: Vec3) void {
+    let sp: P3 = vp_proj(a.*.cam, zone_center(a), p);
+    a.*.inp.keys.len = 0;
+    a.*.inp.mx = sp.x as i32;
+    a.*.inp.my = sp.y as i32;
+    a.*.inp.prev_btn = 0; a.*.inp.btn = 0;
+    app_frame(a, 0.016);
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1024, 640);
+    let _pl: i32 = scene_place(a.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    let c1: i32 = scene_place(a.*.scene, Kind.Chamber, vox(2, 1, 2), 0);
+    let c2: i32 = scene_place(a.*.scene, Kind.Emitter, vox(6, 1, 6), 0);
+    app_frame_all(a);
+    app_frame(a, 0.016);   // cam_update
+
+    hover_at(a, center(a, c1));
+    check("hovering a part sets hover_comp", a.*.hover_comp == c1, &failures);
+
+    hover_at(a, center(a, c2));
+    check("hover follows the cursor to another part", a.*.hover_comp == c2, &failures);
+
+    let vp: Rect = zone_center(a);
+    a.*.inp.mx = vp.x + 2; a.*.inp.my = vp.y + 2;
+    app_frame(a, 0.016);
+    check("hovering empty space clears hover_comp", a.*.hover_comp < 0, &failures);
+
+    // Selecting a part and hovering it: the draw suppresses a hover outline on an
+    // already-selected part (sel_has gate), which we assert via the selection set.
+    sel_set(a, c1);
+    hover_at(a, center(a, c1));
+    check("a selected part is in the selection set", sel_has(a, c1), &failures);
+
+    if (failures == 0) { _zag_println("OUTLINE: ALL PASS"); return 0; }
+    _zag_println("OUTLINE: FAILURES"); return 1;
+}

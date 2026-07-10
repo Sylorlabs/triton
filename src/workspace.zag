@@ -1095,13 +1095,34 @@ fn draw_viewport(a: *App) void {
         }
     }
 
-    // selection highlights
+    // hover outline (subtle): only in select mode, only for an unselected part
+    if (a.*.tool == tool_select() && a.*.hover_comp >= 0 && !sel_has(a, a.*.hover_comp)) {
+        let hci: i32 = scene_comp_index(s, a.*.hover_comp);
+        if (hci >= 0) {
+            let hc: Comp = s.*.comps.data[hci];
+            let hmn: Vec3 = comp_bounds_min(hc);
+            let hmx: Vec3 = comp_bounds_max(hc);
+            let he: f64 = 0.04;
+            vp_box_wire(f, a.*.cam, vp,
+                v3(hmn.x - he, hmn.y - he, hmn.z - he),
+                v3(hmx.x + he, hmx.y + he, hmx.z + he), rgb(150, 156, 172));
+        }
+    }
+
+    // selection outlines: a dim ghost through occluding geometry, then a bright
+    // outline where the part is actually visible.
     let si: i32 = 0;
     while (si < a.*.sel.len) {
         let ci2: i32 = scene_comp_index(s, list.get[i32](a.*.sel, si));
         if (ci2 >= 0) {
             let c5: Comp = s.*.comps.data[ci2];
-            vp_box_wire(f, a.*.cam, vp, comp_bounds_min(c5), comp_bounds_max(c5), th_select());
+            let smn0: Vec3 = comp_bounds_min(c5);
+            let smx0: Vec3 = comp_bounds_max(c5);
+            let se: f64 = 0.05;
+            let smn: Vec3 = v3(smn0.x - se, smn0.y - se, smn0.z - se);
+            let smx: Vec3 = v3(smx0.x + se, smx0.y + se, smx0.z + se);
+            vp_box_wire_ghost(f, a.*.cam, vp, smn, smx, rgb(150, 96, 30));
+            vp_box_wire(f, a.*.cam, vp, smn, smx, th_select());
         }
         si = si + 1;
     }

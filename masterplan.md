@@ -859,9 +859,16 @@ Unsupported component
   real clicks on the +X/+Y/+Z balls and asserts the camera aligns.
 * [x] Grid fades by distance. Evidence: `vp_grid` blends each grid line toward
   the background by edge distance via `lerp_color`; rendered in `x11-captures`.
-* [ ] Selected objects get clear outlines.
-* [ ] Hovered objects get subtle outlines.
-* [ ] Hidden/occluded selected objects get ghost outlines.
+* [x] Selected objects get clear outlines. Evidence: `draw_viewport` draws a
+  bright expanded `vp_box_wire` in `th_select` around each selected component;
+  rendered in `x11-captures`.
+* [x] Hovered objects get subtle outlines. Evidence: `hover_comp` (set in
+  `app_viewport_input` via `vp_pick_comp`) drives a dim outline for the unselected
+  hovered part; `outline` gate verifies the hover tracking, rendered in captures.
+* [x] Hidden/occluded selected objects get ghost outlines. Evidence: a new
+  depth-test-bypassing line path (`line3z(..., always)`, `vp_box_wire_ghost`)
+  draws a dim selection silhouette through occluding geometry before the bright
+  pass; determinism preserved (`frame-diff`), rendered in `x11-captures`.
 * [ ] Beam paths remain readable through dense scenes.
 * [x] Add x/y/z axis colors. Evidence: `gizmo_axis_color` (X red, Y green, Z blue)
   on the orientation gizmo; rendered in `x11-captures`.

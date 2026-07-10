@@ -293,11 +293,11 @@ fn quad3d(f: *FB, clip: Rect, cam: Cam, p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, 
 
 // ── anti-aliased, depth-faded, z-tested 3D line ───────────────────────────────
 
-fn line3_px(f: *FB, clip: Rect, x: i32, y: i32, z: f64, col: i64, cov: i32, zwrite: bool) void {
+fn line3_px(f: *FB, clip: Rect, x: i32, y: i32, z: f64, col: i64, cov: i32, zwrite: bool, always: bool) void {
     if (x < clip.x || x >= clip.x + clip.w || y < clip.y || y >= clip.y + clip.h) { return; }
     let zq: i64 = ((z - 0.03) * 1024.0) as i64;
     let idx: i32 = y * f.*.w + x;
-    if (zq < f.*.zb.data[idx]) {
+    if (always || zq < f.*.zb.data[idx]) {
         let da: i32 = depth_alpha(z);
         let ea: i32 = (cov * da) >> 8;
         f.*.px.data[idx] = mix(col, f.*.px.data[idx], ea);
@@ -306,6 +306,12 @@ fn line3_px(f: *FB, clip: Rect, x: i32, y: i32, z: f64, col: i64, cov: i32, zwri
 }
 
 fn line3(f: *FB, cam: Cam, clip: Rect, p0: Vec3, p1: Vec3, col: i64, zwrite: bool) void {
+    line3z(f, cam, clip, p0, p1, col, zwrite, false);
+}
+
+// `always` = true draws the line even where occluded (ignores the depth test) —
+// used for ghost outlines of hidden geometry.
+fn line3z(f: *FB, cam: Cam, clip: Rect, p0: Vec3, p1: Vec3, col: i64, zwrite: bool, always: bool) void {
     let a: VPt = view_of(cam, p0);
     let b: VPt = view_of(cam, p1);
     let nz: f64 = near_z();
@@ -344,15 +350,15 @@ fn line3(f: *FB, cam: Cam, clip: Rect, p0: Vec3, p1: Vec3, col: i64, zwrite: boo
             let fr: f64 = y - (yi as f64);
             let c1: i32 = ((1.0 - fr) * 240.0) as i32;
             let c2: i32 = (fr * 240.0) as i32;
-            line3_px(f, clip, x as i32, yi, z, col, c1, zwrite);
-            line3_px(f, clip, x as i32, yi + 1, z, col, c2, zwrite);
+            line3_px(f, clip, x as i32, yi, z, col, c1, zwrite, always);
+            line3_px(f, clip, x as i32, yi + 1, z, col, c2, zwrite, always);
         } else {
             let xi: i32 = ifloor(x);
             let fr: f64 = x - (xi as f64);
             let c1: i32 = ((1.0 - fr) * 240.0) as i32;
             let c2: i32 = (fr * 240.0) as i32;
-            line3_px(f, clip, xi, y as i32, z, col, c1, zwrite);
-            line3_px(f, clip, xi + 1, y as i32, z, col, c2, zwrite);
+            line3_px(f, clip, xi, y as i32, z, col, c1, zwrite, always);
+            line3_px(f, clip, xi + 1, y as i32, z, col, c2, zwrite, always);
         }
         i = i + 1;
     }
@@ -393,11 +399,11 @@ fn line3_fast(f: *FB, cam: Cam, clip: Rect, p0: Vec3, p1: Vec3, col: i64, zwrite
         let z: f64 = pa.z + (pb.z - pa.z) * t;
         let xi: i32 = x as i32;
         let yi: i32 = y as i32;
-        line3_px(f, clip, xi, yi, z, col, 256, zwrite);
+        line3_px(f, clip, xi, yi, z, col, 256, zwrite, false);
         if (major_x) {
-            line3_px(f, clip, xi, yi + 1, z, col, 256, zwrite);
+            line3_px(f, clip, xi, yi + 1, z, col, 256, zwrite, false);
         } else {
-            line3_px(f, clip, xi + 1, yi, z, col, 256, zwrite);
+            line3_px(f, clip, xi + 1, yi, z, col, 256, zwrite, false);
         }
         i = i + 1;
     }
@@ -457,6 +463,30 @@ fn vp_box_wire(f: *FB, cam: Cam, clip: Rect, bmin: Vec3, bmax: Vec3, col: i64) v
     line3(f, cam, clip, b, g, col, false);
     line3(f, cam, clip, c, h, col, false);
     line3(f, cam, clip, d, i, col, false);
+}
+
+// Box wireframe drawn through occluding geometry (ghost outline for hidden parts).
+fn vp_box_wire_ghost(f: *FB, cam: Cam, clip: Rect, bmin: Vec3, bmax: Vec3, col: i64) void {
+    let a: Vec3 = v3(bmin.x, bmin.y, bmin.z);
+    let b: Vec3 = v3(bmax.x, bmin.y, bmin.z);
+    let c: Vec3 = v3(bmax.x, bmin.y, bmax.z);
+    let d: Vec3 = v3(bmin.x, bmin.y, bmax.z);
+    let e: Vec3 = v3(bmin.x, bmax.y, bmin.z);
+    let g: Vec3 = v3(bmax.x, bmax.y, bmin.z);
+    let h: Vec3 = v3(bmax.x, bmax.y, bmax.z);
+    let i: Vec3 = v3(bmin.x, bmax.y, bmax.z);
+    line3z(f, cam, clip, a, b, col, false, true);
+    line3z(f, cam, clip, b, c, col, false, true);
+    line3z(f, cam, clip, c, d, col, false, true);
+    line3z(f, cam, clip, d, a, col, false, true);
+    line3z(f, cam, clip, e, g, col, false, true);
+    line3z(f, cam, clip, g, h, col, false, true);
+    line3z(f, cam, clip, h, i, col, false, true);
+    line3z(f, cam, clip, i, e, col, false, true);
+    line3z(f, cam, clip, a, e, col, false, true);
+    line3z(f, cam, clip, b, g, col, false, true);
+    line3z(f, cam, clip, c, h, col, false, true);
+    line3z(f, cam, clip, d, i, col, false, true);
 }
 
 // voxel -> world helpers

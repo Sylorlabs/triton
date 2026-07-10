@@ -113,6 +113,7 @@ struct App {
     box_x0: i32,
     box_y0: i32,
     clipboard: list.ArrayList[Comp],   // copied component snapshots (copy/paste)
+    hover_comp: i32,                    // component under the cursor in select mode
 }
 
 fn app_new(w: i32, h: i32) *App {
@@ -184,6 +185,7 @@ fn app_new(w: i32, h: i32) *App {
         .box_x0 = 0,
         .box_y0 = 0,
         .clipboard = list.make[Comp](8),
+        .hover_comp = 0 - 1,
     });
     a.*.inp.w = w;
     a.*.inp.h = h;
@@ -902,9 +904,11 @@ fn app_viewport_input(a: *App) void {
         return;
     }
 
-    // select tool
+    // select tool — track the component under the cursor for hover highlighting
+    a.*.hover_comp = vp_pick_comp(a.*.scene, a.*.cam, vp, inp.*.mx, inp.*.my);
+    if (a.*.box_sel) { a.*.hover_comp = 0 - 1; }
     if (btn_pressed(inp, 0)) {
-        let hit: i32 = vp_pick_comp(a.*.scene, a.*.cam, vp, inp.*.mx, inp.*.my);
+        let hit: i32 = a.*.hover_comp;
         if (hit < 0) {
             // empty press: begin a rubber-band box; clear/commit deferred to release
             a.*.box_sel = true;
