@@ -58,6 +58,18 @@ fn push_str(out: *list.ArrayList[u8], s: []u8) void {
     let i: i32 = 0; while (i < s.len) { list.push[u8](out, s[i]); i = i + 1; }
 }
 
+// wall-clock timestamp: clock_gettime(CLOCK_REALTIME=0, &ts) -> ts.tv_sec (epoch s)
+fn epoch_seconds() i64 {
+    let ts: list.ArrayList[i64] = list.make[i64](2);
+    list.push[i64](&ts, 0);
+    list.push[i64](&ts, 0);
+    let rc: i64 = _zag_raw_syscall(228, 0, ts.data as i64, 0, 0, 0, 0);
+    if (rc != 0) { list.free[i64](&ts); return 0; }
+    let sec: i64 = ts.data[0];
+    list.free[i64](&ts);
+    return sec;
+}
+
 fn main() i32 {
     let failures: i32 = 0;
 
@@ -85,6 +97,7 @@ fn main() i32 {
     push_str(&rep, "- Hardware (CPU): "); push_str(&rep, cpu); push_str(&rep, "\n");
     push_str(&rep, "- Kernel: "); push_str(&rep, kernel); push_str(&rep, "\n");
     push_str(&rep, "- Compiler/runtime: znc (self-hosted Zag), pure-Zag CPU renderer\n");
+    push_str(&rep, "- Generated (epoch seconds): "); push_str(&rep, _zag_i64_to_str(epoch_seconds())); push_str(&rep, "\n");
     push_str(&rep, "- Scene: 4 components, 1024x640 framebuffer, 2x blit target\n\n");
     push_str(&rep, "| Stage | Iterations | Total ms | us/frame |\n");
     push_str(&rep, "|---|---|---|---|\n");
@@ -127,8 +140,10 @@ fn main() i32 {
         m_scene >= 0 && m_raster >= 0 && m_ui >= 0 && m_blit >= 0 && m_present >= 0, &failures);
     let back: []u8 = _zag_read_file("evidence/bench-report.md");
     check_ok("the generated report was written and is re-readable", back.len > 0, &failures);
-    check_ok("the report carries hardware/software metadata",
-        contains(back, "Hardware (CPU):") && contains(back, "Kernel:"), &failures);
+    check_ok("the report carries hardware/software metadata and a timestamp",
+        contains(back, "Hardware (CPU):") && contains(back, "Kernel:") &&
+        contains(back, "Generated (epoch seconds):"), &failures);
+    check_ok("the generated timestamp is a real positive wall-clock value", epoch_seconds() > 0, &failures);
     check_ok("the report separates all five stages",
         contains(back, "scene-update") && contains(back, "rasterization") &&
         contains(back, "ui-text") && contains(back, "blit") && contains(back, "present"), &failures);

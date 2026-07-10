@@ -224,8 +224,13 @@ hardware, kernel, firmware, driver, display role, and date.
       missing/invalid value falls back safely.
 - [ ] Query GPU properties rather than embedding render-node, clock, CU, family,
       or memory assumptions.
-- [ ] Remove hardcoded frame-time and component-count claims from documentation;
-      publish benchmark results with environment and timestamp instead.
+- [x] Remove hardcoded frame-time and component-count claims from documentation;
+      publish benchmark results with environment and timestamp instead. Evidence:
+      the `doc-perf-claim-audit` gate rejects hardcoded frame-time/fps/component-count
+      claims in `README.md`/`docs` (currently none), and performance numbers are
+      published only through the generated `evidence/bench-report.md`, which now
+      carries the CPU model, kernel, runtime, and a real wall-clock timestamp
+      (`clock_gettime` epoch seconds) via the `bench` gate.
 - [x] Add a repository test that rejects banned unsupported claims and suspicious
       physical literals outside approved model fixtures. Evidence:
       `unsupported-claim-audit`.
