@@ -1,0 +1,82 @@
+// opt_report_test.zag — the optimizer reports gains as measured, provenance-
+// carrying, exact deltas (Masterplan Section 20.3): improvements are measured
+// before/after deltas with units and method, every gain names its rewrite family
+// and which cost terms changed, and the structural gain is stated exactly (no
+// manufactured speedup or false-precision range).
+
+@import("../std/list.zag") as list
+@import("../src/optimizer.zag")
+@import("../src/flash_ir.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn contains(hay: []u8, needle: []u8) bool {
+    let n: i32 = hay.len; let m: i32 = needle.len;
+    if (m == 0) { return true; }
+    let i: i32 = 0;
+    while (i + m <= n) {
+        let j: i32 = 0; let ok: bool = true;
+        while (j < m) { if (hay[i + j] != needle[j]) { ok = false; } j = j + 1; }
+        if (ok) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn build_chain(dead: i32) *Scene {
+    let s: *Scene = scene_new();
+    let _p: i32 = scene_place(s, Kind.Plate, vox(0, 0, 0), 0);
+    let e: i32 = scene_place(s, Kind.Emitter, vox(1, 1, 2), 0);
+    let c: i32 = scene_place(s, Kind.Chamber, vox(4, 1, 3), 0);
+    let d: i32 = scene_place(s, Kind.Detector, vox(7, 1, 4), 0);
+    let _ok: bool = flash_route(s, e, 0, c, 0) && flash_route(s, c, 3, d, 0);
+    let k: i32 = 0;
+    while (k < dead) {
+        let _de: i32 = scene_place(s, Kind.Emitter, vox(1, 1, 5 + k), 0);   // dead, unrouted, non-overlapping
+        k = k + 1;
+    }
+    return s;
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+
+    let s: *Scene = build_chain(2);
+    let p: OptProposal = opt_analyze(s);
+    check("a real improving proposal exists to report on", p.family != opt_family_none() && p.valid, &failures);
+    let rep: []u8 = opt_gain_report(p);
+    _zag_print(rep);
+
+    // ── 1469: provenance — which family + which cost terms changed, before/after ─
+    check("the report names the rewrite family that produced the gain",
+        contains(rep, "family=dead-path"), &failures);
+    check("the report shows measured before/after for the changed cost terms",
+        contains(rep, "components: 6 -> 4 (-2)"), &failures);
+    check("the report lists every named cost term",
+        contains(rep, "guides:") && contains(rep, "guide_len_nm:") && contains(rep, "delay_symbols:"), &failures);
+
+    // ── 1466: measured deltas with units and method, not assumed ────────────────
+    check("the report states units and a measurement method",
+        contains(rep, "units=counts/nm/symbols") && contains(rep, "method=structural-cost-model"), &failures);
+    // the headline gain equals the exact cost-score delta (measured, not assumed)
+    let before: i64 = opt_cost_score(p.before);
+    let after: i64 = opt_cost_score(p.after);
+    let exact_pct: i64 = ((before - after) * 100) / before;
+    check("the reported gain equals the exact measured cost-score delta",
+        (opt_gain_percent(p) as i64) == exact_pct, &failures);
+
+    // ── 1471: exact structural gain, no manufactured precision ──────────────────
+    check("a structural gain is reported as exact, not a false-precision range",
+        contains(rep, "uncertainty=exact"), &failures);
+    // per-term deltas are exactly after-minus-before (a measured difference)
+    let comp_delta: i32 = p.after.components - p.before.components;
+    check("each per-term delta is the exact measured difference", comp_delta == 0 - 2, &failures);
+
+    opt_proposal_free(&p); scene_free(s);
+
+    if (failures == 0) { _zag_println("OPT REPORT: ALL PASS"); return 0; }
+    _zag_println("OPT REPORT: FAILURES"); return 1;
+}

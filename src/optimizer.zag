@@ -321,6 +321,42 @@ fn opt_gain_percent(p: OptProposal) i32 {
     return ((d * 100) / b) as i32;
 }
 
+// One cost-term line: "  <label>: <before> -> <after> (<signed delta>)". The delta
+// is a measured before/after difference, never an assumption.
+fn opt_cost_line(label: []u8, before: i64, after: i64) []u8 {
+    let d: i64 = after - before;
+    let sign: []u8 = "";
+    if (d >= 0) { sign = "+"; }
+    let r: []u8 = _zag_str_concat("  ", label);
+    r = _zag_str_concat(r, ": ");
+    r = _zag_str_concat(r, _zag_i64_to_str(before));
+    r = _zag_str_concat(r, " -> ");
+    r = _zag_str_concat(r, _zag_i64_to_str(after));
+    r = _zag_str_concat(r, " (");
+    r = _zag_str_concat(r, sign);
+    r = _zag_str_concat(r, _zag_i64_to_str(d));
+    return _zag_str_concat(r, ")\n");
+}
+
+// A provenance-carrying gain report (Section 20.3): which family produced the gain,
+// which cost terms changed and by how much (measured before/after), with units and
+// method. The cost model is STRUCTURAL (exact integer/geometry counts, not a timing
+// measurement), so the gain is exact — reported as such rather than as a fabricated
+// speedup or false-precision range. Timing gains, when quoted, come only from the
+// Phase K benchmark harness with its own environment metadata.
+fn opt_gain_report(p: OptProposal) []u8 {
+    let r: []u8 = _zag_str_concat("family=", opt_family_name(p.family));
+    r = _zag_str_concat(r, " gain=");
+    r = _zag_str_concat(r, _zag_i64_to_str(opt_gain_percent(p) as i64));
+    r = _zag_str_concat(r, "% method=structural-cost-model units=counts/nm/symbols uncertainty=exact\n");
+    r = _zag_str_concat(r, opt_cost_line("components", p.before.components as i64, p.after.components as i64));
+    r = _zag_str_concat(r, opt_cost_line("chambers", p.before.chambers as i64, p.after.chambers as i64));
+    r = _zag_str_concat(r, opt_cost_line("guides", p.before.guides as i64, p.after.guides as i64));
+    r = _zag_str_concat(r, opt_cost_line("guide_len_nm", p.before.guide_len_nm as i64, p.after.guide_len_nm as i64));
+    r = _zag_str_concat(r, opt_cost_line("delay_symbols", p.before.delay_symbols as i64, p.after.delay_symbols as i64));
+    return r;
+}
+
 // Verify a candidate edit set against `s`: output-equivalent, structurally valid,
 // and a strict cost improvement. Returns the candidate's cost via `after`.
 fn opt_edits_win(s: *Scene, removed: list.ArrayList[i32],

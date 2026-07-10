@@ -1463,13 +1463,26 @@ applied.
       cost. No cost term may be a hardcoded marketing number. Evidence: `OptCost`
       and `opt_cost`/`opt_cost_score` in `src/optimizer.zag` derive every term
       from scene geometry and the model; `optimizer` gate asserts the gain.
-- [ ] Report improvements as measured deltas from a reproducible baseline, with
+- [x] Report improvements as measured deltas from a reproducible baseline, with
       units, method, and environment, in the same evidence style as Phase K
       benchmarks. Never present an assumed or extrapolated speedup as measured.
-- [ ] Attach provenance to every reported gain: which rewrite family produced it,
-      which cost terms changed, and by how much, with before/after values.
-- [ ] State a gain as a range with uncertainty when it is noise-adjacent; do not
-      manufacture false precision.
+      Evidence: `opt_gain_report` quotes the gain as the measured before→after
+      cost-score delta with `units=counts/nm/symbols` and `method=structural-cost-
+      model`; `optimizer-report` proves the headline gain equals the exact measured
+      delta (never assumed). Timing figures come only from the Phase K `bench` report
+      with its environment metadata.
+- [x] Attach provenance to every reported gain: which rewrite family produced it,
+      which cost terms changed, and by how much, with before/after values. Evidence:
+      `opt_gain_report` names the rewrite family and prints every named cost term
+      (components, chambers, guides, guide_len_nm, delay_symbols) as
+      `before -> after (signed delta)`; `optimizer-report` asserts the family and the
+      measured per-term before/after values.
+- [x] State a gain as a range with uncertainty when it is noise-adjacent; do not
+      manufacture false precision. Evidence: the structural cost model yields exact
+      integer/geometry deltas, so `opt_gain_report` reports `uncertainty=exact`
+      rather than fabricating a speedup or a false-precision range; a noise-adjacent
+      timing gain would instead be quoted only through the `bench` harness. Proven by
+      `optimizer-report`.
 
 ### 20.4 Optimizer Surface, Proposals, and Auto-Apply
 
