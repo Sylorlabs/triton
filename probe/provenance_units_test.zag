@@ -1,0 +1,74 @@
+// provenance_units_test.zag — every physical parameter carries a complete
+// provenance record, missing evidence renders as Unknown/Not characterized, and
+// every unit derivation is dimensionally checked (Masterplan Section 5: attach
+// provenance to every parameter; render missing evidence as Unknown; unit-
+// conversion and dimensional-analysis tests cover every derivation; no user-visible
+// claim lacks provenance).
+
+@import("../std/list.zag") as list
+@import("../src/device_model.zag")
+@import("../src/sim.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn streq(a: []u8, b: []u8) bool { return _zag_strcmp(a, b) == 1; }
+fn fabs(x: f64) f64 { if (x < 0.0) { return 0.0 - x; } return x; }
+
+// a known parameter must carry a full provenance record
+fn known_provenance_ok(p: PhysicalParam) bool {
+    return p.known && p.units.len > 0 && p.source.len > 0 && p.source_version.len > 0 &&
+        p.date_.len > 0 && p.method.len > 0 && evidence_class_name(p.confidence).len > 0;
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let m: DeviceModel = model_reference_illustrative();
+
+    // ── provenance is attached to EVERY physical parameter (173, 228) ───────────
+    check("every device-model parameter carries a complete provenance record",
+        known_provenance_ok(m.pitch_nm) && known_provenance_ok(m.group_index) &&
+        known_provenance_ok(m.emitter_rate_ghz) && known_provenance_ok(m.chamber_rate_ghz) &&
+        known_provenance_ok(m.detector_rate_ghz) && known_provenance_ok(m.emitter_wavelength_min_nm) &&
+        known_provenance_ok(m.emitter_wavelength_step_nm) && known_provenance_ok(m.chamber_resonance_nm),
+        &failures);
+    check("each provenance record names units, source, version, date, and method",
+        m.pitch_nm.units.len > 0 && streq(m.pitch_nm.source_version, "1") &&
+        m.pitch_nm.date_.len > 0 && m.pitch_nm.method.len > 0, &failures);
+
+    // ── missing evidence renders as Unknown / Not characterized (221) ───────────
+    let u: PhysicalParam = physical_unknown("nm");
+    check("an uncharacterized parameter is Unknown, not an invented value",
+        !u.known && streq(u.source, "Unknown") && streq(u.method, "Not characterized") &&
+        streq(evidence_class_name(u.confidence), "Unknown"), &failures);
+
+    // ── dimensional analysis: units validated, impossible values rejected ───────
+    check("the reference model passes unit/dimension validation", model_units_dims_valid(m), &failures);
+    let bad: DeviceModel = model_reference_illustrative();
+    bad.group_index.value = 0.5;   // n_g < 1 is physically impossible
+    check("a physically impossible group index fails dimensional validation",
+        !model_units_dims_valid(bad), &failures);
+    let bad2: DeviceModel = model_reference_illustrative();
+    bad2.pitch_nm.units = "GHz";   // wrong dimension for a pitch
+    check("a wrong-dimension unit string fails validation", !model_units_dims_valid(bad2), &failures);
+
+    // ── unit conversions in every timing derivation (227) ───────────────────────
+    // propagation delay (nm -> fs) is positive and linear in length
+    let d1: f64 = guide_delay_fs(1000.0);
+    let d2: f64 = guide_delay_fs(2000.0);
+    check("propagation delay is positive and linear in length (nm -> fs)",
+        d1 > 0.0 && fabs(d2 - 2.0 * d1) < 0.001, &failures);
+    // symbol quantization (fs/period -> symbols): min 1, monotonic, capped
+    check("a sub-symbol hop quantizes to 1 symbol", guide_delay_symbols_for(100.0, 1.0) == 1, &failures);
+    check("symbol delay is monotonic non-decreasing in length",
+        guide_delay_symbols_for(100.0, 10000000.0) <= guide_delay_symbols_for(100.0, 20000000.0), &failures);
+    check("a lower clock (longer period) yields no more symbols for a fixed length",
+        guide_delay_symbols_for(10.0, 5000000.0) <= guide_delay_symbols_for(100.0, 5000000.0), &failures);
+    check("an absurd length is clamped to the named 4096-symbol guard",
+        guide_delay_symbols_for(100.0, 1000000000000000.0) == 4096, &failures);
+
+    if (failures == 0) { _zag_println("PROVENANCE UNITS: ALL PASS"); return 0; }
+    _zag_println("PROVENANCE UNITS: FAILURES"); return 1;
+}

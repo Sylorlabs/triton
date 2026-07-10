@@ -113,6 +113,7 @@ fn gates_3(f: i32) i32 {
     if (!run_suite("feedback", "rm -f probe/feedback_test.new && ../zag/zag-poc/znc probe/feedback_test.zag -o probe/feedback_test.new && mv -f probe/feedback_test.new probe/feedback_test && ./probe/feedback_test")) { f = f + 1; }
     if (!run_suite("optimizer-verify", "rm -f probe/opt_verify_test.new && ../zag/zag-poc/znc probe/opt_verify_test.zag -o probe/opt_verify_test.new && mv -f probe/opt_verify_test.new probe/opt_verify_test && ./probe/opt_verify_test")) { f = f + 1; }
     if (!run_suite("optimizer-schedule", "rm -f probe/opt_schedule_test.new && ../zag/zag-poc/znc probe/opt_schedule_test.zag -o probe/opt_schedule_test.new && mv -f probe/opt_schedule_test.new probe/opt_schedule_test && ./probe/opt_schedule_test")) { f = f + 1; }
+    if (!run_suite("provenance-units", "rm -f probe/provenance_units_test.new && ../zag/zag-poc/znc probe/provenance_units_test.zag -o probe/provenance_units_test.new && mv -f probe/provenance_units_test.new probe/provenance_units_test && ./probe/provenance_units_test")) { f = f + 1; }
     return f;
 }
 

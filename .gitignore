@@ -70,3 +70,4 @@ probe/sim_semantics_test
 probe/feedback_test
 probe/opt_verify_test
 probe/opt_schedule_test
+probe/provenance_units_test

@@ -170,8 +170,12 @@ hardware, kernel, firmware, driver, display role, and date.
 - [ ] Represent wavelength range, bandwidth, propagation loss, group index,
       dispersion, switching response, detector response, geometry limits,
       temperature assumptions, tolerances, and uncertainty where applicable.
-- [ ] Attach a provenance record to every physical parameter: source, source
-      version, date, method, units, uncertainty, and confidence class.
+- [x] Attach a provenance record to every physical parameter: source, source
+      version, date, method, units, uncertainty, and confidence class. Evidence:
+      `PhysicalParam` carries all of `{value, units, source, source_version, date_,
+      method, uncertainty, confidence}`; `provenance-units` asserts every one of the
+      reference model's eight parameters has a complete, non-empty provenance record
+      with a named confidence class.
 - [x] Distinguish measured, literature-derived, simulated, user-entered,
       illustrative, and unknown values. Evidence: `EvidenceClass` +
       `evidence_class_name` (all six classes); the inspector renders the class
@@ -218,14 +222,29 @@ hardware, kernel, firmware, driver, display role, and date.
 - [x] Add a repository test that rejects banned unsupported claims and suspicious
       physical literals outside approved model fixtures. Evidence:
       `unsupported-claim-audit`.
-- [ ] Render missing evidence as `Unknown` or `Not characterized`.
+- [x] Render missing evidence as `Unknown` or `Not characterized`. Evidence:
+      `physical_unknown` produces a parameter with `known=false`, source `Unknown`,
+      method `Not characterized`, and the `Unknown` confidence class (asserted by
+      `provenance-units`); the inspector's `draw_provenance` renders it as
+      "Unknown / Not characterized" rather than inventing a value (`provenance` gate).
 
 ### Acceptance
 
 - [x] Changing the device model changes derived timing without a source edit.
       Evidence: engine assertion of the same name.
-- [ ] Unit-conversion and dimensional-analysis tests cover every derivation.
-- [ ] No user-visible physical or performance claim lacks provenance.
+- [x] Unit-conversion and dimensional-analysis tests cover every derivation.
+      Evidence: `provenance-units` checks the propagation-delay derivation (nm→fs,
+      positive and linear in length), the symbol-quantization derivation (sub-symbol
+      →1, monotonic in length, clock-period scaling, 4096 cap), and dimensional
+      validation (reference model valid; impossible group index and wrong-dimension
+      units rejected); complements `units-dims` and `simulation-properties` (delay
+      linearity, rate monotonicity).
+- [x] No user-visible physical or performance claim lacks provenance. Evidence:
+      every user-visible physical parameter carries a complete provenance record
+      (`provenance-units`) and renders it in the inspector (`provenance`); performance
+      numbers are published only through the generated `evidence/bench-report.md` with
+      CPU/kernel/runtime metadata (`bench`); and `unsupported-claim-audit` rejects
+      unprovenanced physical literals outside approved fixtures.
 - [x] The application can represent an incompletely characterized device without
       inventing a value. Evidence:
       `incomplete model cannot silently advance verified simulation`.
