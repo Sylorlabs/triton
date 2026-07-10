@@ -853,14 +853,16 @@ Unsupported component
   (`draw_gizmo` render, `gizmo_hit`/`gizmo_apply` in `app_viewport_input`)
   reflects the live camera basis and snaps the view on click; `gizmo` gate drives
   real clicks on the +X/+Y/+Z balls and asserts the camera aligns.
-* [ ] Grid fades by distance.
+* [x] Grid fades by distance. Evidence: `vp_grid` blends each grid line toward
+  the background by edge distance via `lerp_color`; rendered in `x11-captures`.
 * [ ] Selected objects get clear outlines.
 * [ ] Hovered objects get subtle outlines.
 * [ ] Hidden/occluded selected objects get ghost outlines.
 * [ ] Beam paths remain readable through dense scenes.
 * [x] Add x/y/z axis colors. Evidence: `gizmo_axis_color` (X red, Y green, Z blue)
   on the orientation gizmo; rendered in `x11-captures`.
-* [ ] Add world origin marker.
+* [x] Add world origin marker. Evidence: `vp_grid` draws X/Y/Z origin axes plus a
+  white origin cube at (0,0,0); rendered in `x11-captures`.
 * [ ] Add clipping/section view later for dense engines.
 
 No fake flat UI for 3D objects. Selection, snapping, and editing should all understand true 3D.

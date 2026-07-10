@@ -470,19 +470,42 @@ fn vox_center(v: Vox) Vec3 {
 
 // ── the design grid ───────────────────────────────────────────────────────────
 
+// Linear blend between two 0xRRGGBB colors (t: 0 = a, 1 = b).
+fn lerp_color(a: i64, b: i64, t: f64) i64 {
+    let ar: i64 = (a / 65536) % 256;
+    let ag: i64 = (a / 256) % 256;
+    let ab: i64 = a % 256;
+    let br: i64 = (b / 65536) % 256;
+    let bg: i64 = (b / 256) % 256;
+    let bb: i64 = b % 256;
+    let rr: i64 = ar + (((br - ar) as f64) * t) as i64;
+    let rg: i64 = ag + (((bg - ag) as f64) * t) as i64;
+    let rb: i64 = ab + (((bb - ab) as f64) * t) as i64;
+    return rr * 65536 + rg * 256 + rb;
+}
+
 fn vp_grid(f: *FB, cam: Cam, clip: Rect) void {
     let ext: i32 = 48;
+    let mid: i32 = ext / 2;
     let major: i64 = rgb(62, 66, 79);
+    let bg: i64 = rgb(16, 16, 20);
     let i: i32 = 0;
     while (i <= ext) {
         if (i % 8 == 0) {
-            line3_fast(f, cam, clip, v3(i as f64, 0.0, 0.0), v3(i as f64, 0.0, ext as f64), major, true);
-            line3_fast(f, cam, clip, v3(0.0, 0.0, i as f64), v3(ext as f64, 0.0, i as f64), major, true);
+            // fade lines toward the grid edges so distant geometry recedes
+            let d: i32 = i - mid;
+            if (d < 0) { d = 0 - d; }
+            let col: i64 = lerp_color(major, bg, (d as f64) / (mid as f64) * 0.85);
+            line3_fast(f, cam, clip, v3(i as f64, 0.0, 0.0), v3(i as f64, 0.0, ext as f64), col, true);
+            line3_fast(f, cam, clip, v3(0.0, 0.0, i as f64), v3(ext as f64, 0.0, i as f64), col, true);
         }
         i = i + 1;
     }
+    // world axes from the origin (X red, Z blue, Y green) — the origin marker
     line3_fast(f, cam, clip, v3(0.0, 0.0, 0.0), v3(ext as f64, 0.0, 0.0), rgb(158, 74, 74), true);
     line3_fast(f, cam, clip, v3(0.0, 0.0, 0.0), v3(0.0, 0.0, ext as f64), rgb(74, 104, 172), true);
+    line3_fast(f, cam, clip, v3(0.0, 0.0, 0.0), v3(0.0, 4.0, 0.0), rgb(96, 186, 96), true);
+    vp_box(f, cam, clip, v3(0.0 - 0.16, 0.0 - 0.16, 0.0 - 0.16), v3(0.16, 0.16, 0.16), rgb(220, 220, 230), 256, false);
 }
 
 // ── component rendering ───────────────────────────────────────────────────────
