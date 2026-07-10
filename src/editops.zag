@@ -395,6 +395,24 @@ fn op_optimize(j: *Journal, s: *Scene, removed: list.ArrayList[i32],
     }
 }
 
+// Rotate a component and record it as an undoable op (kind 7). Returns the
+// scene_set_rot verdict (0 on success).
+fn op_rotate(j: *Journal, s: *Scene, id: i32, new_rot: i32) i32 {
+    let ci: i32 = scene_comp_index(s, id);
+    if (ci < 0) { return 1; }
+    let old_rot: i32 = s.*.comps.data[ci].rot;
+    let v: i32 = scene_set_rot(s, id, new_rot);
+    if (v != 0) { return v; }
+    let nr: i32 = s.*.comps.data[scene_comp_index(s, id)].rot;
+    let op: UOp = uop_empty();
+    op.kind = 7;
+    list.push[i32](&op.relabel_ids, id);
+    list.push[i32](&op.relabel_old, old_rot);
+    list.push[i32](&op.relabel_new, nr);
+    journal_push(j, op);
+    return 0;
+}
+
 // apply the inverse of `op` to the scene (op moves undo->redo)
 fn journal_undo(j: *Journal, s: *Scene) bool {
     if (j.*.undo.len == 0) { return false; }
@@ -461,6 +479,9 @@ fn journal_undo(j: *Journal, s: *Scene) bool {
             gi = gi + 1;
         }
     }
+    if (op.kind == 7) {
+        let _r: i32 = scene_set_rot(s, op.relabel_ids.data[0], op.relabel_old.data[0]);
+    }
     list.push[UOp](&j.*.redo, op);
     return true;
 }
@@ -503,6 +524,9 @@ fn journal_redo(j: *Journal, s: *Scene) bool {
             scene_remove(s, op.comps.data[ci2].id);
             ci2 = ci2 + 1;
         }
+    }
+    if (op.kind == 7) {
+        let _r: i32 = scene_set_rot(s, op.relabel_ids.data[0], op.relabel_new.data[0]);
     }
     list.push[UOp](&j.*.undo, op);
     return true;
@@ -699,9 +723,9 @@ fn jrn_ser_op(out: *list.ArrayList[u8], op: UOp) void {
 
 fn journal_has_opt(j: *Journal) bool {
     let i: i32 = 0;
-    while (i < j.*.undo.len) { if (j.*.undo.data[i].kind == 6) { return true; } i = i + 1; }
+    while (i < j.*.undo.len) { if (j.*.undo.data[i].kind >= 6) { return true; } i = i + 1; }
     let r: i32 = 0;
-    while (r < j.*.redo.len) { if (j.*.redo.data[r].kind == 6) { return true; } r = r + 1; }
+    while (r < j.*.redo.len) { if (j.*.redo.data[r].kind >= 6) { return true; } r = r + 1; }
     return false;
 }
 

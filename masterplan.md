@@ -407,9 +407,14 @@ The user and agent must be able to perform the same core project operations.
 
 ### 8.2 Public Agent API
 
-- [ ] Provide schema-described operations for create/open/save/close project,
+- [x] Provide schema-described operations for create/open/save/close project,
       list/get/place/move/rotate/delete components, connect/disconnect/reroute,
       inspect models, run checks, simulate, trace, render, export, undo, and redo.
+      Evidence: the agent command layer now implements the full set (new/open/save/
+      close, list/get/place/move/rotate/delete, route/disconnect/reroute, inspect,
+      verify, sim, trace, render, export, undo, redo); the `agent-ops` gate
+      exercises the newly added move/rotate/disconnect/reroute/inspect/close plus
+      undo, and MCP advertises generated schemas (`mcp-tool-coverage`).
 - [x] Give every mutation an idempotency key and transactional result. Evidence:
       unkeyed project mutations fail with `E_IDEMPOTENCY_REQUIRED`; CLI `request`
       and MCP `triton_mutate` return revision/key/undo/affected metadata and
@@ -421,7 +426,11 @@ The user and agent must be able to perform the same core project operations.
       `TRITON_EXPECT_REV`, stable `E_REV_CONFLICT`, and the
       `agent-revision-conflict` byte/revision immutability gate.
 - [ ] Stream long-running progress and support safe cancellation.
-- [ ] Validate MCP, CLI, pipe, and in-process commands through one command layer.
+- [x] Validate MCP, CLI, pipe, and in-process commands through one command layer.
+      Evidence: MCP (`--mcp`), CLI (`zagctl`), pipe (`--pipe`), and agent
+      (`--agent`) entry points all dispatch through the same `agent.zag` command
+      handler with shared capability/idempotency/revision validation; exercised by
+      the `agent-*`, `mcp-*`, `zagctl-envelope`, and `agent-ops` gates.
 - [x] Prevent tools from bypassing design rules or persistence invariants.
       Evidence: `mcp-invariant-enforcement` rejects invalid MCP placement and
       routing while preserving project bytes and revision.

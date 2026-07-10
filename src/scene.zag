@@ -474,6 +474,32 @@ fn scene_resize(s: *Scene, id: i32, new_size: Vox) i32 {
     return 0;
 }
 
+// Rotate a placed component in place (quarter turns about +Y), updating occupancy.
+// Returns 0 on success or the scene_can_place error code.
+fn scene_set_rot(s: *Scene, id: i32, new_rot: i32) i32 {
+    let ci: i32 = scene_comp_index(s, id);
+    if (ci < 0) { return 1; }
+    let c: Comp = s.*.comps.data[ci];
+    let nr: i32 = new_rot % 4;
+    if (nr < 0) { nr = nr + 4; }
+    if (nr == c.rot) { return 0; }
+    let verdict: i32 = scene_can_place_ext(s, c.kind, c.size, c.origin, nr, id);
+    if (verdict != 0) { return verdict; }
+    let old_cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_comp(c, &old_cells);
+    let i: i32 = 0;
+    while (i < old_cells.len) { hm_del_cell(s, old_cells.data[i]); i = i + 1; }
+    list.free[Vox](&old_cells);
+    s.*.comps.data[ci].rot = nr;
+    let new_cells: list.ArrayList[Vox] = list.make[Vox](8);
+    scene_cells_comp(s.*.comps.data[ci], &new_cells);
+    let j: i32 = 0;
+    while (j < new_cells.len) { hm_put_cell(s, new_cells.data[j], id); j = j + 1; }
+    list.free[Vox](&new_cells);
+    scene_mark_topo_comp(s, id);
+    return 0;
+}
+
 fn scene_remove_guide_at(s: *Scene, gi: i32) void {
     let fc: i32 = s.*.guides.data[gi].from_c;
     let tc: i32 = s.*.guides.data[gi].to_c;

@@ -249,6 +249,9 @@ fn agent_is_mutation(line: []u8, toks: *list.ArrayList[Tok]) bool {
         tok_eq(line, verb, "place_on") || tok_eq(line, verb, "route") ||
         tok_eq(line, verb, "delete") || tok_eq(line, verb, "del") ||
         tok_eq(line, verb, "undo") || tok_eq(line, verb, "redo") ||
+        tok_eq(line, verb, "move") || tok_eq(line, verb, "rotate") ||
+        tok_eq(line, verb, "disconnect") || tok_eq(line, verb, "reroute") ||
+        tok_eq(line, verb, "close") ||
         tok_eq(line, verb, "save") || tok_eq(line, verb, "open")) { return true; }
     return tok_eq(line, verb, "flash") && toks.*.len >= 2 &&
         tok_eq(line, list.get[Tok](toks, 1), "import");
@@ -849,7 +852,10 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
         tok_eq(line, verb, "place") || tok_eq(line, verb, "place_here") ||
         tok_eq(line, verb, "place_on") || tok_eq(line, verb, "route") ||
         tok_eq(line, verb, "delete") || tok_eq(line, verb, "del") ||
-        tok_eq(line, verb, "undo") || tok_eq(line, verb, "redo")) { required = cap_edit(); }
+        tok_eq(line, verb, "undo") || tok_eq(line, verb, "redo") ||
+        tok_eq(line, verb, "move") || tok_eq(line, verb, "rotate") ||
+        tok_eq(line, verb, "disconnect") || tok_eq(line, verb, "reroute") ||
+        tok_eq(line, verb, "close")) { required = cap_edit(); }
     if (tok_eq(line, verb, "flash") && toks.*.len >= 2 &&
         tok_eq(line, list.get[Tok](toks, 1), "import")) { required = cap_edit(); }
     a.*.request_command = line;
@@ -1003,6 +1009,92 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
         } else {
             agent_err("nothing to redo");
         }
+        return;
+    }
+    if (tok_eq(line, verb, "move")) {
+        if (toks.*.len < 5) { agent_err("usage: move <id> <dx> <dy> <dz>"); return; }
+        let id: i32 = tok_i64(line, list.get[Tok](toks, 1)) as i32;
+        let ci: i32 = scene_comp_index(a.*.scene, id);
+        if (ci < 0) { agent_err("unknown component id"); return; }
+        let dx: i32 = tok_i64(line, list.get[Tok](toks, 2)) as i32;
+        let dy: i32 = tok_i64(line, list.get[Tok](toks, 3)) as i32;
+        let dz: i32 = tok_i64(line, list.get[Tok](toks, 4)) as i32;
+        let cc: Comp = a.*.scene.*.comps.data[ci];
+        let no: Vox = vox(cc.origin.x + dx, cc.origin.y + dy, cc.origin.z + dz);
+        if (scene_can_place_ext(a.*.scene, cc.kind, cc.size, no, cc.rot, id) != 0) {
+            agent_err("illegal move (collision or bounds)"); return;
+        }
+        op_move(&a.*.jrn, a.*.scene, id, vox(dx, dy, dz));
+        let one: list.ArrayList[i32] = list.make[i32](1);
+        list.push[i32](&one, id);
+        group_move(a.*.scene, &one, vox(dx, dy, dz));
+        list.free[i32](&one);
+        session_after_edit(a);
+        agent_mutation_ok(a, "moved", id);
+        return;
+    }
+    if (tok_eq(line, verb, "rotate")) {
+        if (toks.*.len < 2) { agent_err("usage: rotate <id> [quarters]"); return; }
+        let id: i32 = tok_i64(line, list.get[Tok](toks, 1)) as i32;
+        let ci: i32 = scene_comp_index(a.*.scene, id);
+        if (ci < 0) { agent_err("unknown component id"); return; }
+        let q: i32 = 1;
+        if (toks.*.len >= 3) { q = tok_i64(line, list.get[Tok](toks, 2)) as i32; }
+        if (op_rotate(&a.*.jrn, a.*.scene, id, a.*.scene.*.comps.data[ci].rot + q) != 0) {
+            agent_err("rotation collides"); return;
+        }
+        session_after_edit(a);
+        agent_mutation_ok(a, "rotated", id);
+        return;
+    }
+    if (tok_eq(line, verb, "disconnect")) {
+        if (toks.*.len < 2) { agent_err("usage: disconnect <guide_id>"); return; }
+        let gid: i32 = tok_i64(line, list.get[Tok](toks, 1)) as i32;
+        if (scene_guide_index(a.*.scene, gid) < 0) { agent_err("unknown guide id"); return; }
+        op_del_guide(&a.*.jrn, a.*.scene, gid);
+        scene_remove_guide(a.*.scene, gid);
+        session_after_edit(a);
+        agent_mutation_ok(a, "disconnected", gid);
+        return;
+    }
+    if (tok_eq(line, verb, "reroute")) {
+        if (toks.*.len < 2) { agent_err("usage: reroute <guide_id>"); return; }
+        let gid: i32 = tok_i64(line, list.get[Tok](toks, 1)) as i32;
+        let gi: i32 = scene_guide_index(a.*.scene, gid);
+        if (gi < 0) { agent_err("unknown guide id"); return; }
+        let g: Guide = a.*.scene.*.guides.data[gi];
+        let fc: i32 = g.from_c; let fp: i32 = g.from_p;
+        let tc: i32 = g.to_c; let tp: i32 = g.to_p;
+        let start: Vox = comp_port_attach(a.*.scene.*.comps.data[scene_comp_index(a.*.scene, fc)], fp);
+        let goal: Vox = comp_port_attach(a.*.scene.*.comps.data[scene_comp_index(a.*.scene, tc)], tp);
+        op_del_guide(&a.*.jrn, a.*.scene, gid);
+        scene_remove_guide(a.*.scene, gid);
+        let path: list.ArrayList[Vox] = list.make[Vox](32);
+        if (!route_guide(a.*.scene, start, goal, &path)) {
+            list.free[Vox](&path); agent_err("reroute: no path"); return;
+        }
+        let ngid: i32 = scene_add_guide(a.*.scene, fc, fp, tc, tp, path);
+        op_add_guide(&a.*.jrn, a.*.scene, ngid);
+        session_after_edit(a);
+        agent_mutation_ok(a, _zag_str_concat("id=", _zag_i64_to_str(ngid as i64)), ngid);
+        return;
+    }
+    if (tok_eq(line, verb, "inspect")) {
+        let comp: []u8 = "no";
+        if (model_complete(a.*.scene.*.model)) { comp = "yes"; }
+        let m1: []u8 = _zag_str_concat("schema=", _zag_i64_to_str(a.*.scene.*.model.schema_version as i64));
+        let m2: []u8 = _zag_str_concat(m1, _zag_str_concat(" model_complete=", comp));
+        let m3: []u8 = _zag_str_concat(m2, _zag_str_concat(" components=", _zag_i64_to_str(a.*.scene.*.comps.len as i64)));
+        let m4: []u8 = _zag_str_concat(m3, _zag_str_concat(" guides=", _zag_i64_to_str(a.*.scene.*.guides.len as i64)));
+        agent_ok1(m4);
+        return;
+    }
+    if (tok_eq(line, verb, "close")) {
+        scene_clear(a.*.scene);
+        journal_clear(&a.*.jrn);
+        sel_clear(a);
+        session_after_edit(a);
+        agent_mutation_ok(a, "closed", 0 - 1);
         return;
     }
     if (tok_eq(line, verb, "get")) {
