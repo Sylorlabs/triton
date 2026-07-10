@@ -1,0 +1,57 @@
+// persistence_test.zag — save/load fault tolerance (Masterplan Section 10 /
+// Phase G): truncated or bit-corrupted project files are rejected on load and the
+// active scene is left intact (atomic save via temp+rename protects the target).
+
+@import("../std/list.zag") as list
+@import("../src/flash_ir.zag")
+@import("../src/editops.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn write_bytes(path: []u8, b: []u8) bool { return atomic_write_file(path, b); }
+
+fn main() i32 {
+    let failures: i32 = 0;
+
+    // a valid saved project
+    let s: *Scene = scene_new();
+    let _p: i32 = scene_place(s, Kind.Plate, vox(0, 0, 0), 0);
+    let _e: i32 = scene_place(s, Kind.Emitter, vox(1, 1, 2), 0);
+    let good: bool = design_save(s, "/tmp/triton_persist_good.zpa");
+    let raw: []u8 = _zag_read_file("/tmp/triton_persist_good.zpa");
+    check("valid project saved and read back", good && raw.len > 16, &failures);
+
+    // an active scene we must not clobber on a failed load
+    let active: *Scene = scene_new();
+    let ap: i32 = scene_place(active, Kind.Plate, vox(0, 0, 0), 0);
+    let base: i32 = active.*.comps.len;
+
+    // truncation (a partial write)
+    let _t: bool = write_bytes("/tmp/triton_persist_trunc.zpa", raw[0..raw.len / 2]);
+    check("a truncated project is rejected",
+        !design_load(active, "/tmp/triton_persist_trunc.zpa"), &failures);
+    check("rejected truncated load leaves the active scene intact",
+        active.*.comps.len == base && scene_comp_index(active, ap) >= 0, &failures);
+
+    // bit corruption (content byte flipped -> checksum mismatch)
+    let buf: list.ArrayList[u8] = list.make[u8](raw.len);
+    let i: i32 = 0;
+    while (i < raw.len) { list.push[u8](&buf, raw[i]); i = i + 1; }
+    let m: i32 = raw.len / 2;
+    if (buf.data[m] == 88) { buf.data[m] = 89; } else { buf.data[m] = 88; }
+    let _c: bool = write_bytes("/tmp/triton_persist_corrupt.zpa", buf.data[0..buf.len]);
+    check("a bit-corrupted project is rejected",
+        !design_load(active, "/tmp/triton_persist_corrupt.zpa"), &failures);
+    check("rejected corrupt load leaves the active scene intact",
+        active.*.comps.len == base, &failures);
+
+    // the untouched valid project still loads cleanly
+    let target: *Scene = scene_new();
+    check("the valid project still loads", design_load(target, "/tmp/triton_persist_good.zpa"), &failures);
+
+    if (failures == 0) { _zag_println("PERSISTENCE: ALL PASS"); return 0; }
+    _zag_println("PERSISTENCE: FAILURES"); return 1;
+}

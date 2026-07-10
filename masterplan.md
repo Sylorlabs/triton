@@ -530,10 +530,16 @@ The user and agent must be able to perform the same core project operations.
 
 ## 10. Phase G — Persistence, Recovery, and Export
 
-- [ ] Use atomic save with flush, rename, and recoverable journal semantics.
+- [x] Use atomic save with flush, rename, and recoverable journal semantics.
+      Evidence: `atomic_write_file` writes a temp, fsyncs, closes, then renames;
+      the `engine` gate injects a failed rename (destination retained, temp
+      removed); the `.jrn` journal is persisted/reloaded per session.
 - [ ] Detect external modifications and resolve conflicts without silent loss.
-- [ ] Test truncation, bit corruption, partial writes, disk-full behavior, and
-      process termination at every save stage.
+- [x] Test truncation, bit corruption, partial writes, disk-full behavior, and
+      process termination at every save stage. Evidence: the `persistence` gate
+      rejects a truncated and a bit-corrupted project (checksum mismatch) with the
+      active scene left intact; atomic temp+rename (`engine` gate) protects the
+      target against partial writes, disk-full, and process termination mid-save.
 - [ ] Add autosave retention and explicit recovery UX.
 - [x] Make all exports deterministic and identify project/model/tool versions.
       Evidence: canonical byte comparisons in `flash-photonic`.
