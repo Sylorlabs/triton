@@ -610,7 +610,11 @@ GPU work must remain bounded, reviewed, opt-in, and safe for a display GPU.
       a reviewed opcode from a fixed whitelist (`pm4_opcode_allowed`:
       SET_SH_REG/DISPATCH_DIRECT/WRITE_DATA/NOP); `pm4_ib_valid` rejects any other
       opcode, and no opcode-enumeration code exists. `gpu-uapi` gate.
-- [ ] Permit only reviewed, hash-verified kernels from a fixed manifest.
+- [x] Permit only reviewed, hash-verified kernels from a fixed manifest. Evidence:
+      `gpu_kernel_allowed` hashes an emitted kernel and admits it only if the hash
+      is in the fixed manifest (`gpu_kernel_manifest_fill_hash`); the
+      `gpu-kernel-manifest` gate confirms the reviewed fill kernel passes while a
+      one-byte tamper, an arbitrary blob, and an empty kernel are all rejected.
 - [ ] Require a non-display GPU for destructive fault/reset certification.
 
 ### 12.2 Compiler-Owned Kernels

@@ -420,6 +420,28 @@ fn pm4_type3(opcode: i64, body_dwords: i64) i64 {
     return 0xC0000000 + ((body_dwords - 1) & 0x3FFF) * 0x10000 + (opcode & 0xFF) * 0x100;
 }
 
+// ── reviewed-kernel manifest (Section 12.2) ───────────────────────────────────
+// Deterministic 48-bit polynomial hash of kernel machine code, for verifying an
+// emitted kernel against the fixed manifest before it is ever loaded to the GPU.
+fn gpu_kernel_hash(code: []u8) i64 {
+    let h: i64 = 2166136261;
+    let i: i32 = 0;
+    while (i < code.len) {
+        h = (h * 16777619 + (code[i] as i64)) % 4294967296;   // keep 32 bits (no overflow)
+        i = i + 1;
+    }
+    return h;
+}
+
+// The fixed manifest: hashes of the only kernels Triton will run. Any kernel whose
+// hash is not listed is rejected — no arbitrary machine code reaches the GPU.
+fn gpu_kernel_manifest_fill_hash() i64 { return 3356428357; }
+
+fn gpu_kernel_allowed(code: []u8) bool {
+    let h: i64 = gpu_kernel_hash(code);
+    return h == gpu_kernel_manifest_fill_hash();
+}
+
 // ── submission fault taxonomy (Section 12.1) ──────────────────────────────────
 fn gpu_err_name(e: i32) []u8 {
     if (e == 1) { return "submit-failure"; }

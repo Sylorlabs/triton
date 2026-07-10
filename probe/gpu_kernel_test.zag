@@ -1,0 +1,41 @@
+// gpu_kernel_test.zag — only reviewed, hash-verified kernels from a fixed manifest
+// (Masterplan Section 12.2, non-destructive sector). PURE SOFTWARE: emits the
+// reviewed kernel and checks it against the manifest hash; never touches the GPU.
+
+@import("../std/list.zag") as list
+@import("../src/rdna.zag")
+@import("../src/gpu_rt.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+
+    let code: list.ArrayList[u8] = list.make[u8](256);
+    let _n: i32 = rdna_emit_fill_kernel(&code);
+    check("the reviewed fill kernel is permitted by the manifest",
+        gpu_kernel_allowed(code.data[0..code.len]), &failures);
+    check("its hash equals the recorded manifest hash",
+        gpu_kernel_hash(code.data[0..code.len]) == gpu_kernel_manifest_fill_hash(), &failures);
+
+    // a single-byte tamper is rejected
+    code.data[0] = (code.data[0] + 1) as u8;
+    check("a single-byte-tampered kernel is rejected",
+        !gpu_kernel_allowed(code.data[0..code.len]), &failures);
+
+    // an arbitrary blob is not in the manifest
+    let blob: list.ArrayList[u8] = list.make[u8](8);
+    let i: i32 = 0;
+    while (i < 8) { list.push[u8](&blob, 170); i = i + 1; }
+    check("an arbitrary machine-code blob is rejected",
+        !gpu_kernel_allowed(blob.data[0..blob.len]), &failures);
+
+    // an empty kernel is rejected
+    check("an empty kernel is rejected", !gpu_kernel_allowed(blob.data[0..0]), &failures);
+
+    if (failures == 0) { _zag_println("GPU KERNEL: ALL PASS"); return 0; }
+    _zag_println("GPU KERNEL: FAILURES"); return 1;
+}
