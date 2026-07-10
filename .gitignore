@@ -75,3 +75,4 @@ probe/design_db_test
 probe/session_conflict_test
 probe/opt_report_test
 probe/timing_test
+probe/limits_test

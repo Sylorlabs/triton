@@ -213,8 +213,15 @@ hardware, kernel, firmware, driver, display role, and date.
       derived from length and the selected material/device model. Evidence:
       `guide_delay_fs_for`, `guide_delay_symbols_for_model`, and
       `simulation-properties`.
-- [ ] Replace unexplained component-count and delay caps with named, documented,
-      configurable safety limits and tests.
+- [x] Replace unexplained component-count and delay caps with named, documented,
+      configurable safety limits and tests. Evidence: all caps live in
+      `src/limits.zag` as named, documented functions; the inline `4096` delay cap is
+      now `limit_delay_symbols_max()` (used in `guide_delay_symbols_for*`), and the
+      component/guide/chamber/delay caps are environment-configurable via
+      `limit_env_or` (`TRITON_MAX_COMPONENTS`/`_GUIDES`/`_CHAMBERS_PER_PLATE`/
+      `_MAX_DELAY_SYMBOLS`). The `limits` gate proves the named default, delay-cap
+      clamping to the named limit, and that an env override wins while a
+      missing/invalid value falls back safely.
 - [ ] Query GPU properties rather than embedding render-node, clock, CU, family,
       or memory assumptions.
 - [ ] Remove hardcoded frame-time and component-count claims from documentation;

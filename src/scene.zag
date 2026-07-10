@@ -10,7 +10,7 @@
 @import("world.zag")
 @import("limits.zag")
 
-fn max_chambers_per_plate() i32 { return 64; }
+fn max_chambers_per_plate() i32 { return limit_env_or("TRITON_MAX_CHAMBERS_PER_PLATE", 64); }
 
 struct Comp {
     id: i32,

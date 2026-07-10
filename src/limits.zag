@@ -1,4 +1,24 @@
-// limits.zag — centralized resource ceilings for untrusted project/tool input.
+// limits.zag — centralized, named, documented resource ceilings for untrusted
+// project/tool input. Every cap lives here (never inlined as a bare literal) so it
+// is auditable in one place. The design-capacity caps below (component/guide count,
+// chambers per plate, delay-line depth) are CONFIGURABLE via environment overrides
+// through `limit_env_or`; the byte/protocol ceilings stay fixed as hard safety
+// limits that untrusted input must never raise.
+
+// Read a positive integer override from the environment, else the documented
+// default. A missing, empty, non-numeric, or non-positive value falls back safely.
+fn limit_env_or(name_: []u8, def: i32) i32 {
+    let v: []u8 = _zag_getenv(name_);
+    if (v.len <= 0) { return def; }
+    let n: i32 = _zag_str_to_i64(v) as i32;
+    if (n <= 0) { return def; }
+    return n;
+}
+
+// Named delay-line depth cap (symbols): the simulator memory guard that quantized
+// guide delays are clamped to. Configurable for large fabrics.
+fn limit_delay_symbols_max() i32 { return limit_env_or("TRITON_MAX_DELAY_SYMBOLS", 4096); }
+
 fn limit_agent_request_bytes() i32 { return 4096; }
 fn limit_agent_script_bytes() i32 { return 1048576; }
 fn limit_mcp_header_bytes() i32 { return 8192; }
@@ -7,8 +27,8 @@ fn limit_project_bytes() i32 { return 16777216; }
 fn limit_project_line_bytes() i32 { return 65536; }
 fn limit_journal_bytes() i32 { return 16777216; }
 fn limit_journal_operations() i32 { return 256; }
-fn limit_project_components() i32 { return 100000; }
-fn limit_project_guides() i32 { return 200000; }
+fn limit_project_components() i32 { return limit_env_or("TRITON_MAX_COMPONENTS", 100000); }
+fn limit_project_guides() i32 { return limit_env_or("TRITON_MAX_GUIDES", 200000); }
 fn limit_graph_path_points() i32 { return 4096; }
 fn limit_route_search_nodes() i32 { return 262144; }
 fn limit_waveguide_layer_min() i32 { return 1; }

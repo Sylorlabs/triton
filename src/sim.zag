@@ -71,7 +71,8 @@ fn guide_delay_symbols_for(clock_ghz: f64, length_nm: f64) i32 {
     let t_ps: f64 = length_nm / velocity;
     let d: i32 = ((t_ps / period_ps) + 0.9999999) as i32;
     if (d < 1) { d = 1; }
-    if (d > 4096) { d = 4096; }   // named simulator memory guard
+    let cap: i32 = limit_delay_symbols_max();
+    if (d > cap) { d = cap; }   // named, configurable simulator memory guard
     return d;
 }
 
@@ -82,7 +83,8 @@ fn guide_delay_symbols_for_model(s: *Scene, clock_ghz: f64, length_nm: f64) i32 
     let t_ps: f64 = length_nm / velocity;
     let d: i32 = ((t_ps / period_ps) + 0.9999999) as i32;
     if (d < 1) { d = 1; }
-    if (d > 4096) { d = 4096; }
+    let cap2: i32 = limit_delay_symbols_max();
+    if (d > cap2) { d = cap2; }
     return d;
 }
 

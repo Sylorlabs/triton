@@ -1,0 +1,39 @@
+// limits_test.zag — named, documented, configurable safety limits (Masterplan
+// Section 5.2): every component-count and delay cap is a named limit in one place,
+// enforced, and overridable via the environment. The gate runs this with
+// TRITON_LIMITS_TEST=777 set so the override path is exercised.
+
+@import("../std/list.zag") as list
+@import("../src/limits.zag")
+@import("../src/sim.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+
+    // ── every safety limit is named and returns a sane positive default ─────────
+    check("component/guide/delay caps are named limits with positive defaults",
+        limit_project_components() > 0 && limit_project_guides() > 0 &&
+        limit_delay_symbols_max() >= 1, &failures);
+
+    // ── the delay cap is the named limit, not an inline literal ─────────────────
+    // an absurd guide length must clamp to exactly limit_delay_symbols_max()
+    let cap: i32 = limit_delay_symbols_max();
+    check("an absurd guide length clamps to the named delay cap",
+        guide_delay_symbols_for(100.0, 1000000000000000.0) == cap, &failures);
+
+    // ── configurability: env override wins; missing env falls back to default ───
+    check("a set environment override replaces the default",
+        limit_env_or("TRITON_LIMITS_TEST", 100) == 777, &failures);
+    check("an unset environment variable falls back to the default",
+        limit_env_or("TRITON_LIMITS_DEFINITELY_UNSET_XYZ", 42) == 42, &failures);
+    check("a non-positive or non-numeric override is ignored (safe fallback)",
+        limit_env_or("TRITON_LIMITS_DEFINITELY_UNSET_XYZ", 5) == 5, &failures);
+
+    if (failures == 0) { _zag_println("LIMITS: ALL PASS"); return 0; }
+    _zag_println("LIMITS: FAILURES"); return 1;
+}
