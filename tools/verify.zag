@@ -107,6 +107,8 @@ fn gates_3(f: i32) i32 {
     if (!run_suite("gpu-vgpu", "rm -f probe/gpu_vgpu_test.new && ../zag/zag-poc/znc probe/gpu_vgpu_test.zag -o probe/gpu_vgpu_test.new && mv -f probe/gpu_vgpu_test.new probe/gpu_vgpu_test && ./probe/gpu_vgpu_test")) { f = f + 1; }
     if (!run_suite("render-golden", "rm -f probe/render_golden_test.new && ../zag/zag-poc/znc probe/render_golden_test.zag -o probe/render_golden_test.new && mv -f probe/render_golden_test.new probe/render_golden_test && ./probe/render_golden_test")) { f = f + 1; }
     if (!run_suite("bench", "rm -f tools/bench.bin && ../zag/zag-poc/znc tools/bench.zag -o tools/bench.bin && ./tools/bench.bin")) { f = f + 1; }
+    if (!run_suite("agent-matrix", "sh tools/agent_matrix.sh")) { f = f + 1; }
+    if (!run_suite("crash-recovery", "rm -f /tmp/triton_crash_* && ../zag/zag-poc/znc probe/crash_recovery_test.zag -o probe/crash_recovery_test.new && mv -f probe/crash_recovery_test.new probe/crash_recovery_test && ./probe/crash_recovery_test")) { f = f + 1; }
     return f;
 }
 

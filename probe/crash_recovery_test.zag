@@ -1,0 +1,75 @@
+// crash_recovery_test.zag — crash recovery during a multi-operation transaction
+// (Masterplan Section 8.3 / Phase E). Proves: a committed multi-op transaction is
+// durable and atomic (temp+fsync+rename, no torn primary); an interrupted/torn
+// write is detected by the content hash and REJECTED before the in-memory scene is
+// cleared, so a failed load leaves the last-good project intact — recovery is
+// automatic, with no partial or corrupt state.
+
+@import("../std/list.zag") as list
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn copy_bytes(src: []u8) list.ArrayList[u8] {
+    let c: list.ArrayList[u8] = list.make[u8](src.len);
+    let i: i32 = 0;
+    while (i < src.len) { list.push[u8](&c, src[i]); i = i + 1; }
+    return c;
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let good: []u8 = "/tmp/triton_crash_good.zpa";
+    let torn: []u8 = "/tmp/triton_crash_torn.zpa";
+    let trunc: []u8 = "/tmp/triton_crash_trunc.zpa";
+
+    let a: *App = app_new(1024, 640);
+    // build a real populated scene: a plate floor plus an emitter
+    let _pl: i32 = scene_place(a.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    let _em: i32 = scene_place(a.*.scene, Kind.Emitter, vox(1, 1, 2), 0);
+    let base: i32 = a.*.scene.*.comps.len;
+
+    // ── commit transaction v1 ──────────────────────────────────────────────────
+    check("v1 save succeeds", design_save(a.*.scene, good), &failures);
+    let b: *App = app_new(1024, 640);
+    check("v1 loads back with the same component count",
+        design_load_into(b.*.scene, good) && b.*.scene.*.comps.len == base, &failures);
+
+    // atomic write leaves no stray temp file (it was renamed into place)
+    let leftover: []u8 = _zag_read_file(_zag_str_concat(good, ".tmp"));
+    check("no torn temp file remains after an atomic save", leftover.len <= 0, &failures);
+
+    // ── multi-op transaction: several edits, then one atomic commit ────────────
+    let _c1: i32 = scene_place(a.*.scene, Kind.Detector, vox(2, 1, 6), 0);
+    let _c2: i32 = scene_place(a.*.scene, Kind.Detector, vox(3, 1, 6), 0);
+    let v2count: i32 = a.*.scene.*.comps.len;
+    check("the batch added two components in-memory", v2count == base + 2, &failures);
+    check("v2 commits atomically", design_save(a.*.scene, good), &failures);
+    check("v2 reloads with the committed batch visible",
+        design_load_into(b.*.scene, good) && b.*.scene.*.comps.len == v2count, &failures);
+
+    // ── simulate a crash that left a torn (content-corrupted) file ─────────────
+    let raw: []u8 = _zag_read_file(good);
+    let cbuf: list.ArrayList[u8] = copy_bytes(raw);
+    cbuf.data[10] = (cbuf.data[10] ^ 1) as u8;   // flip one content byte -> hash mismatch
+    let _w1: bool = atomic_write_file(torn, cbuf.data[0..cbuf.len]);
+    check("a torn (hash-mismatched) project is detected and rejected",
+        !design_load_into(b.*.scene, torn), &failures);
+    check("the rejected load left the last-good scene intact (auto-recovery)",
+        b.*.scene.*.comps.len == v2count, &failures);
+
+    // ── simulate a crash mid-write (truncated file) ────────────────────────────
+    let _w2: bool = atomic_write_file(trunc, raw[0..raw.len / 2]);
+    check("a truncated project is rejected", !design_load_into(b.*.scene, trunc), &failures);
+    check("the truncated load also preserved the scene", b.*.scene.*.comps.len == v2count, &failures);
+
+    // ── explicit recovery to the last-good file still works ────────────────────
+    check("reloading the last-good project recovers the committed state",
+        design_load_into(b.*.scene, good) && b.*.scene.*.comps.len == v2count, &failures);
+
+    if (failures == 0) { _zag_println("CRASH RECOVERY: ALL PASS"); return 0; }
+    _zag_println("CRASH RECOVERY: FAILURES"); return 1;
+}

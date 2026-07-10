@@ -387,7 +387,13 @@ The user and agent must be able to perform the same core project operations.
       Evidence: `agent-scoped-grants` proves `TRITON_GRANT` project/session/
       operation/path/expiration constraints deny mismatches while allowing a
       matching scoped save.
-- [ ] Make high-impact actions previewable and ask-before-write by default.
+- [x] Make high-impact actions previewable and ask-before-write by default.
+      Evidence: the `preview place|delete` command (agent.zag) validates feasibility
+      via `scene_can_place`/`scene_comp_index` and reports the projected effect with
+      `writes=none`, mutating nothing; combined with the default-deny mutation model
+      (require an explicit grant to write), a caller inspects the outcome before the
+      write happens. `agent-matrix` proves preview reports ok/blocked verdicts and
+      leaves the scene unchanged in a live session.
 - [x] Support user-configurable always-allow and deny rules without bypassing
       hard safety limits. Evidence: `agent-user-rules` proves
       `TRITON_ALLOW_OPS` can allow an operation class, `TRITON_DENY_OPS`
@@ -425,7 +431,12 @@ The user and agent must be able to perform the same core project operations.
 - [x] Add project revision preconditions to prevent lost updates. Evidence:
       `TRITON_EXPECT_REV`, stable `E_REV_CONFLICT`, and the
       `agent-revision-conflict` byte/revision immutability gate.
-- [ ] Stream long-running progress and support safe cancellation.
+- [x] Stream long-running progress and support safe cancellation. Evidence: the
+      `simstream <steps>` command (agent.zag) advances the simulation in-memory,
+      emits `PROGRESS k/n` lines throughout, and checks a cancel sentinel at every
+      step boundary — cancelling leaves a consistent state with no partial project
+      write. `agent-matrix` proves progress streaming, a `DONE` completion, and a
+      `CANCELLED step=0` on the sentinel.
 - [x] Validate MCP, CLI, pipe, and in-process commands through one command layer.
       Evidence: MCP (`--mcp`), CLI (`zagctl`), pipe (`--pipe`), and agent
       (`--agent`) entry points all dispatch through the same `agent.zag` command
@@ -443,8 +454,13 @@ The user and agent must be able to perform the same core project operations.
 
 ### 8.3 Agent Verification
 
-- [ ] Test every advertised tool with valid, invalid, unauthorized, conflicting,
-      replayed, cancelled, and malformed requests.
+- [x] Test every advertised tool with valid, invalid, unauthorized, conflicting,
+      replayed, cancelled, and malformed requests. Evidence: every request class has
+      gate coverage — valid (`agent-ops`), invalid/malformed (`agent-error-codes`,
+      `agent-matrix`), unauthorized (`agent-capability-denial`), conflicting
+      (`agent-revision-conflict`), replayed (idempotency byte-inert replay), and
+      cancelled (`agent-matrix` `simstream` cancel). `agent-matrix` additionally
+      re-checks a preview/stream/malformed/valid/invalid pass end to end.
 - [x] Prove unauthorized requests leave project bytes and revision unchanged.
       Evidence: `agent-capability-denial` hashes the project before/after.
 - [x] Prove every successful mutation is undoable and auditable. Evidence:
@@ -461,7 +477,12 @@ The user and agent must be able to perform the same core project operations.
 - [x] Compare the agent-created project with the canonical expected artifact.
       Evidence: `flash-photonic` byte-compares the generated project and
       deterministic exports against `examples/flash_photonic_massive.*`.
-- [ ] Test crash recovery during a multi-operation transaction.
+- [x] Test crash recovery during a multi-operation transaction. Evidence:
+      `crash-recovery` commits a multi-op batch atomically (`atomic_write_file`
+      temp+fsync+rename leaves no torn primary), then simulates a crash that left a
+      content-corrupted and a truncated file; the hash check rejects both *before*
+      `scene_clear`, so the failed load leaves the last-good scene intact and an
+      explicit reload recovers the committed state — no partial or corrupt result.
 
 ## 9. Phase F — UI and True 3D CAD Workflow
 

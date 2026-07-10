@@ -1312,10 +1312,86 @@ fn agent_load_i32_le(buf: []u8, off: i32) i32 {
     return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
 }
 
+// Preview a high-impact mutation without writing: validate feasibility and report
+// the projected effect, changing nothing (Section 8.1, ask-before-write). Preview
+// is read-only, so it needs no mutation grant — it is how a caller inspects an
+// action before requesting the grant that would actually perform it.
+fn agent_preview(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
+    if (toks.*.len < 2) { agent_err("E_PREVIEW usage: preview <place|delete> ..."); return; }
+    let sub: Tok = list.get[Tok](toks, 1);
+    if (tok_eq(line, sub, "place")) {
+        if (toks.*.len < 6) { agent_err("E_PREVIEW usage: preview place <kind> <x> <y> <z> [rot]"); return; }
+        let ki: i32 = parse_kind_name(tok_slice(line, list.get[Tok](toks, 2)));
+        if (ki < 0) { agent_err("E_PREVIEW unknown kind (plate chamber soh emitter detector)"); return; }
+        let x: i32 = tok_i64(line, list.get[Tok](toks, 3)) as i32;
+        let y: i32 = tok_i64(line, list.get[Tok](toks, 4)) as i32;
+        let z: i32 = tok_i64(line, list.get[Tok](toks, 5)) as i32;
+        let rot: i32 = 0;
+        if (toks.*.len >= 7) { rot = tok_i64(line, list.get[Tok](toks, 6)) as i32; }
+        let code: i32 = scene_can_place(a.*.scene, kind_at(ki), vox(x, y, z), rot);
+        if (code == 0) {
+            let m: []u8 = _zag_str_concat("PREVIEW place ok would-add kind=", tok_slice(line, list.get[Tok](toks, 2)));
+            agent_ok1(_zag_str_concat(m, " writes=none"));
+        } else {
+            let m: []u8 = _zag_str_concat("PREVIEW place blocked ", place_err_text(code));
+            agent_ok1(_zag_str_concat(m, " writes=none"));
+        }
+    } else if (tok_eq(line, sub, "delete")) {
+        if (toks.*.len < 3) { agent_err("E_PREVIEW usage: preview delete <id>"); return; }
+        let id: i32 = tok_i64(line, list.get[Tok](toks, 2)) as i32;
+        let idx: i32 = scene_comp_index(a.*.scene, id);
+        if (idx < 0) { agent_ok1("PREVIEW delete blocked no-such-id writes=none"); return; }
+        let nm: []u8 = a.*.scene.*.comps.data[idx].name_;
+        let m: []u8 = _zag_str_concat("PREVIEW delete ok would-remove id=", _zag_i64_to_str(id as i64));
+        m = _zag_str_concat(_zag_str_concat(m, " name="), nm);
+        agent_ok1(_zag_str_concat(m, " writes=none"));
+    } else {
+        agent_err("E_PREVIEW unknown subcommand (place delete)");
+    }
+}
+
+// A cancel sentinel: presence of a readable, non-empty /tmp/triton_cancel requests
+// cancellation. Checked at step boundaries so cancellation is always safe.
+fn agent_cancel_requested() bool {
+    let c: []u8 = _zag_read_file("/tmp/triton_cancel");
+    return c.len > 0;
+}
+
+// Stream progress for a long simulation and support safe cancellation (Section 8.2).
+// The simulation advances in-memory only; project bytes are never touched, so a
+// cancel at any step boundary leaves a consistent state and no partial write.
+fn agent_simstream(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
+    if (toks.*.len < 2) { agent_err("E_SIMSTREAM usage: simstream <steps>"); return; }
+    let n: i64 = tok_i64(line, list.get[Tok](toks, 1));
+    if (n < 0) { agent_err("E_SIMSTREAM steps must be nonnegative"); return; }
+    sim_recompile(a.*.sim, a.*.scene);
+    let every: i64 = n / 10;
+    if (every < 1) { every = 1; }
+    let k: i64 = 0;
+    while (k < n) {
+        if (agent_cancel_requested()) {
+            let cm: []u8 = _zag_str_concat("CANCELLED step=", _zag_i64_to_str(k));
+            agent_ok1(_zag_str_concat(_zag_str_concat(cm, " of "), _zag_i64_to_str(n)));
+            return;
+        }
+        sim_step(a.*.sim, a.*.scene);
+        k = k + 1;
+        if (k % every == 0 || k == n) {
+            let pm: []u8 = _zag_str_concat("PROGRESS ", _zag_i64_to_str(k));
+            agent_ok1(_zag_str_concat(_zag_str_concat(pm, "/"), _zag_i64_to_str(n)));
+        }
+    }
+    agent_ok1(_zag_str_concat("DONE steps=", _zag_i64_to_str(n)));
+}
+
 fn agent_dispatch_line(a: *App, line: []u8) void {
     let toks: list.ArrayList[Tok] = list.make[Tok](16);
     tokenize(line, &toks);
-    if (toks.len > 0 && tok_eq(line, list.get[Tok](toks, 0), "request")) {
+    if (toks.len > 0 && tok_eq(line, list.get[Tok](toks, 0), "preview")) {
+        agent_preview(a, line, &toks);
+    } else if (toks.len > 0 && tok_eq(line, list.get[Tok](toks, 0), "simstream")) {
+        agent_simstream(a, line, &toks);
+    } else if (toks.len > 0 && tok_eq(line, list.get[Tok](toks, 0), "request")) {
         if (toks.len < 4) {
             agent_err("E_REQUEST_ENVELOPE usage: request <key> <expected_revision> <command>");
         } else {

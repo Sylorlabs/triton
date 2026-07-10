@@ -65,3 +65,4 @@ probe/gpu_kernel_test
 probe/gpu_vgpu_test
 probe/render_golden_test
 tools/bench.bin
+probe/crash_recovery_test
