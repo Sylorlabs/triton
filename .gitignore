@@ -49,3 +49,4 @@ probe/dpi_test
 probe/soak_test
 probe/provenance_test
 probe/units_test
+probe/lifecycle_test

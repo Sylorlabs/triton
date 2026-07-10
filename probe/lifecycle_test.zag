@@ -1,0 +1,61 @@
+// lifecycle_test.zag — leak and handle-lifetime test across edit/open/close
+// cycles (Masterplan Section 14 / Phase K). Repeatedly builds, simulates, saves,
+// reloads, and frees a design, exercising scene_free/sim_free so use-after-free,
+// double-free, or unbounded leaks would surface as a crash or OOM.
+
+@import("../std/list.zag") as list
+@import("../src/flash_ir.zag")
+@import("../src/editops.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let n: i32 = 1500;
+    let errors: i32 = 0;
+    let cycle: i32 = 0;
+    while (cycle < n) {
+        // build + edit
+        let s: *Scene = scene_new();
+        let p: i32 = scene_place(s, Kind.Plate, vox(0, 0, 0), 0);
+        let e: i32 = scene_place(s, Kind.Emitter, vox(1, 1, 2), 0);
+        let c: i32 = scene_place(s, Kind.Chamber, vox(4, 1, 3), 0);
+        let d: i32 = scene_place(s, Kind.Detector, vox(7, 1, 4), 0);
+        let built: bool = p > 0 && e > 0 && c > 0 && d > 0 &&
+            flash_route(s, e, 0, c, 0) && flash_route(s, c, 3, d, 0);
+        if (!built) { errors = errors + 1; }
+
+        // simulate
+        let sim: *Sim = sim_new();
+        sim_recompile(sim, s);
+        let step: i32 = 0;
+        while (step < 4) { sim_step(sim, s); step = step + 1; }
+
+        // save + reopen into a fresh scene
+        let saved: bool = design_save(s, "/tmp/triton_lifecycle.zpa");
+        let s2: *Scene = scene_new();
+        let opened: bool = design_load_into(s2, "/tmp/triton_lifecycle.zpa");
+        if (!saved || !opened || scene_validation_errors(s2) != 0) { errors = errors + 1; }
+
+        // close: release every handle
+        sim_free(sim);
+        scene_free(s);
+        scene_free(s2);
+        cycle = cycle + 1;
+    }
+
+    check("completed every edit/open/close cycle without crashing", cycle == n, &failures);
+    check("every reopened design stayed structurally valid", errors == 0, &failures);
+
+    // Final live build proves the allocator is still healthy after the churn.
+    let s3: *Scene = scene_new();
+    let p3: i32 = scene_place(s3, Kind.Plate, vox(0, 0, 0), 0);
+    check("allocator healthy after the lifecycle churn", p3 > 0 && scene_validation_errors(s3) == 0, &failures);
+    scene_free(s3);
+
+    if (failures == 0) { _zag_println("LIFECYCLE: ALL PASS"); return 0; }
+    _zag_println("LIFECYCLE: FAILURES"); return 1;
+}

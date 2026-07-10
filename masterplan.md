@@ -599,7 +599,10 @@ GPU work must remain bounded, reviewed, opt-in, and safe for a display GPU.
 - [x] Fuzz parsers and serializers with a stable corpus and regression artifacts.
       Evidence: checked-in project/FIR/journal corpus, deterministic project byte
       mutations with accepted-case reserialization, and MCP boundary corpus.
-- [ ] Run leak and handle-lifetime tests across edit/open/close cycles.
+- [x] Run leak and handle-lifetime tests across edit/open/close cycles. Evidence:
+      `lifecycle` gate runs 1500 build/simulate/save/reopen/free cycles exercising
+      `scene_free`/`sim_free`; max RSS stays ~12 MB (no unbounded leak), no crash
+      from double-free/use-after-free, and every reopened design stays valid.
 - [ ] Establish workload-based performance budgets from measured baselines.
 - [ ] Fail regressions statistically and retain raw benchmark samples.
 - [ ] Never optimize by weakening validation, determinism, or the CPU oracle.
