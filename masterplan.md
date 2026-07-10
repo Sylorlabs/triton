@@ -849,13 +849,17 @@ Unsupported component
 * [x] Perspective and orthographic modes. Evidence: `Cam.ortho` honored in both
   `vp_screen` (render/project) and `ray_from_pixel` (pick); `ortho` gate proves
   the toggle, depth-independent projection, and consistent ortho picking.
-* [ ] Clickable 3D orientation gizmo.
+* [x] Clickable 3D orientation gizmo. Evidence: our 6-way axis gizmo
+  (`draw_gizmo` render, `gizmo_hit`/`gizmo_apply` in `app_viewport_input`)
+  reflects the live camera basis and snaps the view on click; `gizmo` gate drives
+  real clicks on the +X/+Y/+Z balls and asserts the camera aligns.
 * [ ] Grid fades by distance.
 * [ ] Selected objects get clear outlines.
 * [ ] Hovered objects get subtle outlines.
 * [ ] Hidden/occluded selected objects get ghost outlines.
 * [ ] Beam paths remain readable through dense scenes.
-* [ ] Add x/y/z axis colors.
+* [x] Add x/y/z axis colors. Evidence: `gizmo_axis_color` (X red, Y green, Z blue)
+  on the orientation gizmo; rendered in `x11-captures`.
 * [ ] Add world origin marker.
 * [ ] Add clipping/section view later for dense engines.
 

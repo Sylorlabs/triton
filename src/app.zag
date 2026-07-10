@@ -687,6 +687,65 @@ fn app_show_saveas(a: *App) void {
 
 // ── viewport interaction ──────────────────────────────────────────────────────
 
+// ── clickable orientation gizmo ───────────────────────────────────────────────
+// Our own 6-way axis gizmo: it reflects the live camera orientation (balls are
+// placed by the camera basis) and snaps the view to any axis on click.
+fn gizmo_r() i32 { return 24; }
+fn gizmo_cx(a: *App) i32 { let vp: Rect = zone_center(a); return vp.x + vp.w - 44; }
+fn gizmo_cy(a: *App) i32 { let vp: Rect = zone_center(a); return vp.y + 44; }
+
+fn gizmo_axis(i: i32) Vec3 {
+    if (i == 0) { return v3(1.0, 0.0, 0.0); }
+    if (i == 1) { return v3(0.0 - 1.0, 0.0, 0.0); }
+    if (i == 2) { return v3(0.0, 1.0, 0.0); }
+    if (i == 3) { return v3(0.0, 0.0 - 1.0, 0.0); }
+    if (i == 4) { return v3(0.0, 0.0, 1.0); }
+    return v3(0.0, 0.0, 0.0 - 1.0);
+}
+
+// Screen position (x,y) of axis ball i, with view depth carried in z (z<=0 faces
+// the viewer). Uses the camera basis, so the gizmo rotates with the view.
+fn gizmo_ball(a: *App, i: i32) P3 {
+    let d: Vec3 = gizmo_axis(i);
+    let sx: f64 = vdot(d, a.*.cam.right);
+    let sy: f64 = vdot(d, a.*.cam.up);
+    let sz: f64 = vdot(d, a.*.cam.fwd);
+    return P3{
+        .x = (gizmo_cx(a) as f64) + sx * (gizmo_r() as f64),
+        .y = (gizmo_cy(a) as f64) - sy * (gizmo_r() as f64),
+        .z = sz,
+        .ok = true,
+    };
+}
+
+// Axis ball under (mx,my), preferring the front-most; -1 if none.
+fn gizmo_hit(a: *App, mx: i32, my: i32) i32 {
+    let best: i32 = 0 - 1;
+    let best_z: f64 = 1000.0;
+    let i: i32 = 0;
+    while (i < 6) {
+        let b: P3 = gizmo_ball(a, i);
+        let dx: f64 = (mx as f64) - b.x;
+        let dy: f64 = (my as f64) - b.y;
+        if (dx * dx + dy * dy <= 81.0) {   // 9 px hit radius
+            if (b.z < best_z) { best_z = b.z; best = i; }
+        }
+        i = i + 1;
+    }
+    return best;
+}
+
+// Snap the camera to look along the chosen axis (pitch clamps handle up/down).
+fn gizmo_apply(a: *App, i: i32) void {
+    if (i == 0) { a.*.cam.yaw = 0.0; a.*.cam.pitch = 0.02; }
+    if (i == 1) { a.*.cam.yaw = 3.14159265; a.*.cam.pitch = 0.02; }
+    if (i == 2) { a.*.cam.pitch = 1.52; }
+    if (i == 3) { a.*.cam.pitch = 0.02; }
+    if (i == 4) { a.*.cam.yaw = 1.57079633; a.*.cam.pitch = 0.02; }
+    if (i == 5) { a.*.cam.yaw = 0.0 - 1.57079633; a.*.cam.pitch = 0.02; }
+    app_log(a, "view aligned to axis");
+}
+
 fn app_viewport_input(a: *App) void {
     let inp: *Input = &a.*.inp;
     let vp: Rect = zone_center(a);
@@ -734,6 +793,12 @@ fn app_viewport_input(a: *App) void {
     cam_update(&a.*.cam, zone_center(a).h);
 
     if (!over || inp.*.capture == 2) { return; }
+
+    // orientation gizmo intercepts clicks before component picking
+    if (btn_pressed(inp, 0)) {
+        let gh: i32 = gizmo_hit(a, inp.*.mx, inp.*.my);
+        if (gh >= 0) { gizmo_apply(a, gh); return; }
+    }
 
     // status-bar cursor cell (at the active working level)
     let lvl: i32 = 1;

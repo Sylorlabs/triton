@@ -1,0 +1,65 @@
+// gizmo_test.zag — clickable orientation gizmo (Masterplan Section 3.5 / Phase F).
+// Drives the real input path: computes each axis ball's screen position from the
+// camera basis, clicks it, and asserts the camera snapped to that axis view.
+
+@import("../std/list.zag") as list
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn absf(x: f64) f64 { if (x < 0.0) { return 0.0 - x; } return x; }
+
+fn click_frame(a: *App, x: i32, y: i32) void {
+    a.*.inp.keys.len = 0;
+    a.*.inp.mx = x; a.*.inp.my = y;
+    a.*.inp.prev_btn = 0; a.*.inp.btn = 1;
+    app_frame(a, 0.016);
+    a.*.inp.prev_btn = 1; a.*.inp.btn = 0;
+    app_frame(a, 0.016);
+    a.*.inp.prev_btn = 0; a.*.inp.btn = 0;
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1024, 640);
+    let _pl: i32 = scene_place(a.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    let _c: i32 = scene_place(a.*.scene, Kind.Chamber, vox(3, 1, 3), 0);
+    app_frame_all(a);
+    app_frame(a, 0.016);   // cam_update sets the camera basis
+
+    // Ball hit-testing lands on the right axis.
+    let bx0: P3 = gizmo_ball(a, 0);
+    check("gizmo hit-test resolves the +X ball",
+        gizmo_hit(a, bx0.x as i32, bx0.y as i32) == 0, &failures);
+
+    // Click +X (from the default iso view): yaw snaps to 0, pitch to horizontal,
+    // and no component gets picked. The camera basis is unchanged going into the
+    // click, so the ball is still where we computed it.
+    click_frame(a, bx0.x as i32, bx0.y as i32);
+    check("clicking +X aligns the view to the X axis",
+        absf(a.*.cam.yaw) < 0.001 && absf(a.*.cam.pitch - 0.02) < 0.001, &failures);
+    check("gizmo click does not select a component", a.*.sel.len == 0, &failures);
+
+    // Refresh the basis, then click +Y: pitch snaps to top-down.
+    app_frame(a, 0.016);
+    let by2: P3 = gizmo_ball(a, 2);
+    click_frame(a, by2.x as i32, by2.y as i32);
+    check("clicking +Y aligns the view to top-down", absf(a.*.cam.pitch - 1.52) < 0.001, &failures);
+
+    // Refresh, then click +Z: yaw snaps to the Z axis.
+    app_frame(a, 0.016);
+    let bz4: P3 = gizmo_ball(a, 4);
+    click_frame(a, bz4.x as i32, bz4.y as i32);
+    check("clicking +Z aligns the view to the Z axis",
+        absf(a.*.cam.yaw - 1.57079633) < 0.001, &failures);
+
+    // A click far from the gizmo is not a gizmo hit.
+    check("empty viewport space is not a gizmo hit",
+        gizmo_hit(a, zone_center(a).x + 20, zone_center(a).y + zone_center(a).h - 20) < 0, &failures);
+
+    if (failures == 0) { _zag_println("GIZMO: ALL PASS"); return 0; }
+    _zag_println("GIZMO: FAILURES"); return 1;
+}
