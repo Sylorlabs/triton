@@ -50,7 +50,7 @@ fn draw_provenance(f: *FB, x: i32, y: i32, label: []u8, p: PhysicalParam) i32 {
 // 1 new / 2 open / 3 save / 4 save-as / 5 quit
 // 10 undo / 11 redo / 12 duplicate / 13 delete / 14 deselect
 // 20 frame-sel / 21 frame-all / 22 top / 23 front / 24 right / 25 perspective
-// 30 shortcuts / 31 demo design
+// 30 shortcuts / 31 demo design / 32 canonical Flash reference PCU
 
 fn app_action(a: *App, code: i32) void {
     a.*.menu = 0 - 1;
@@ -100,6 +100,10 @@ fn app_action(a: *App, code: i32) void {
     }
     if (code == 30) { a.*.modal = modal_keys(); }
     if (code == 31) { app_action_demo(a); }
+    // This is deliberately a first-class visible command rather than an
+    // undocumented file path: the canonical Flash PCU is the reproducible
+    // reference design users can inspect, run, modify, save, and reopen.
+    if (code == 32) { app_open_file(a, "examples/flash_photonic_massive.zpa"); }
     if (code == 40) { a.*.tool = tool_select(); }
     if (code == 41) { a.*.tool = tool_route(); a.*.route_c = 0 - 1; }
     if (code == 42) { a.*.sim.*.playing = !a.*.sim.*.playing; }
@@ -175,6 +179,7 @@ fn palette_commands(out: *list.ArrayList[PCmd]) void {
         ki = ki + 1;
     }
     list.push[PCmd](out, PCmd{ .label = "Load Demo Design", .hint = "F1", .code = 31 });
+    list.push[PCmd](out, PCmd{ .label = "Open Reference Flash PCU", .hint = "", .code = 32 });
     list.push[PCmd](out, PCmd{ .label = "Keyboard Shortcuts", .hint = "", .code = 30 });
 }
 
@@ -874,6 +879,13 @@ fn draw_toolbar(a: *App) void {
         if (pcmd_match("demo design", q)) {
             if (ui_button(f, inp, rect(x, y, w, control_h()), "Load Demo Design", false)) {
                 app_action_demo(a);
+            }
+            y = y + control_h() + pad_text();
+            shown = shown + 1;
+        }
+        if (pcmd_match("reference flash pcu", q)) {
+            if (ui_button(f, inp, rect(x, y, w, control_h()), "Open Reference Flash PCU", false)) {
+                app_action(a, 32);
             }
             y = y + control_h() + pad_text();
             shown = shown + 1;

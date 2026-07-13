@@ -1,0 +1,43 @@
+// reference_pcu_ui_test.zag — visible reference-PCU workflow (Masterplan 9.3).
+// Uses the same command dispatch as the Debug library card and command palette,
+// then exercises the live simulation, save, and reopen path on the canonical
+// Flash PCU. It is intentionally an App test rather than a direct Scene load.
+
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1440, 900);
+
+    // Code 32 is exposed by both the Debug library card and command palette.
+    app_action(a, 32);
+    check("visible reference-PCU command loads the canonical Flash design",
+        a.*.scene.*.comps.len == 384 && a.*.scene.*.guides.len == 192,
+        &failures);
+    check("reference-PCU command frames the loaded design", a.*.cam.dist > 1.0, &failures);
+
+    // The existing Run control maps to this state, and app_frame drives the
+    // exact production simulation update path used by the signal timeline.
+    let before: i64 = a.*.sim.*.symbol;
+    app_action(a, 42);
+    app_frame(a, 1.0);
+    app_action(a, 42);
+    check("visible Run control advances the reference-PCU simulation",
+        a.*.sim.*.symbol > before, &failures);
+
+    a.*.file_ = "/tmp/triton_reference_pcu_ui.zpa";
+    app_save(a);
+    let saved_n: i32 = a.*.scene.*.comps.len;
+    app_new_design(a);
+    app_open_file(a, "/tmp/triton_reference_pcu_ui.zpa");
+    check("visible save then open preserves the reference PCU", a.*.scene.*.comps.len == saved_n,
+        &failures);
+
+    if (failures == 0) { _zag_println("REFERENCE PCU UI: ALL PASS"); return 0; }
+    _zag_println("REFERENCE PCU UI: FAILURES"); return 1;
+}

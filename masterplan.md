@@ -666,7 +666,11 @@ The user and agent must be able to perform the same core project operations.
       `x11-live` on `DISPLAY=:0`, recorded in the ledger.
 - [x] Exercise mouse, keyboard, resize, window close, focus, and repeated open/close.
       Evidence: live `x11-live` suite.
-- [ ] Complete the reference PCU workflow through visible UI controls.
+- [x] Complete the reference PCU workflow through visible UI controls.
+      Evidence: the Debug library card and command palette expose "Open
+      Reference Flash PCU" (never requiring a hidden path); the
+      `reference-pcu-ui` gate drives that production dispatch, Run, save, and
+      reopen paths against the canonical 384-component/192-guide design.
 - [x] Verify screenshots at multiple window sizes and DPI/scaling settings.
       Evidence: responsive layout captured live at 1024x640 and 1440x900
       (`x11-captures`); HiDPI implemented as logical-resolution rendering upscaled
