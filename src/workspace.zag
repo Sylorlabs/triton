@@ -100,6 +100,7 @@ fn app_action(a: *App, code: i32) void {
     }
     if (code == 30) { a.*.modal = modal_keys(); }
     if (code == 31) { app_action_demo(a); }
+    if (code == 49) { a.*.model_open = true; }
     // This is deliberately a first-class visible command rather than an
     // undocumented file path: the canonical Flash PCU is the reproducible
     // reference design users can inspect, run, modify, save, and reopen.
@@ -304,6 +305,8 @@ fn draw_palette(a: *App) void {
         let c: PCmd = filt.data[idx];
         let row: Rect = rect(px + 6, y, pw - 12, row_h);
         let hov: bool = rect_has(row, inp.*.mx, inp.*.my);
+        let _eid: i64 = ui_register(inp, "menuitem", c.label, c.label, row, true,
+                                    idx == a.*.palette_sel, false);
         if (idx == a.*.palette_sel || hov) { fill_round_rect(f, row.x, row.y, row.w, row.h, radius_control(), th_accent()); }
         draw_text(f, row.x + 8, y + 6, c.label, th_text());
         if (c.hint.len > 0) {
@@ -392,6 +395,7 @@ fn menu_items(m: i32, out: *list.ArrayList[MenuItem]) void {
     if (m == 3) {
         list.push[MenuItem](out, MenuItem{ .label = "Shortcuts", .hint = "", .code = 30 });
         list.push[MenuItem](out, MenuItem{ .label = "Load Demo Design", .hint = "F1", .code = 31 });
+        list.push[MenuItem](out, MenuItem{ .label = "Physical Model & Provenance...", .hint = "", .code = 49 });
     }
 }
 
@@ -409,6 +413,8 @@ fn draw_menubar(a: *App) void {
         let bw: i32 = text_w(t) + 18;
         let br: Rect = rect(x, r.y + 3, bw, r.h - 5);
         let hov: bool = rect_has(br, inp.*.mx, inp.*.my);
+        let _eid: i64 = ui_register(inp, "menubaritem", t, t, br,
+                                    a.*.modal == modal_none(), a.*.menu == m, false);
         if (a.*.menu == m) {
             fill_round_rect(f, br.x, br.y, br.w, br.h, radius_control(), th_accent());
         } else if (hov && a.*.modal == modal_none()) {
@@ -430,6 +436,8 @@ fn draw_menubar(a: *App) void {
     let ob: Rect = zone_opt_btn(a);
     let oh: bool = rect_has(ob, inp.*.mx, inp.*.my) && a.*.modal == modal_none();
     let obr: Rect = rect(ob.x, ob.y + 3, ob.w, ob.h - 5);
+    let _oeid: i64 = ui_register(inp, "button", "optimizer", "Optimizer", obr,
+                                 a.*.modal == modal_none(), a.*.opt_open, false);
     if (a.*.opt_open) { fill_round_rect(f, obr.x, obr.y, obr.w, obr.h, radius_control(), th_accent()); }
     else if (oh) { fill_round_rect(f, obr.x, obr.y, obr.w, obr.h, radius_control(), th_panel_alt()); }
     draw_text(f, ob.x + 9, r.y + 7, "opt", th_text());
@@ -447,6 +455,8 @@ fn draw_menubar(a: *App) void {
     let gr: Rect = zone_settings_gear(a);
     let gh: bool = rect_has(gr, inp.*.mx, inp.*.my) && a.*.modal == modal_none();
     let grr: Rect = rect(gr.x, gr.y + 3, gr.w, gr.h - 5);
+    let _geid: i64 = ui_register(inp, "button", "settings", "Settings", grr,
+                                 a.*.modal == modal_none(), a.*.settings_open, false);
     if (a.*.settings_open) { fill_round_rect(f, grr.x, grr.y, grr.w, grr.h, radius_control(), th_accent()); }
     else if (gh) { fill_round_rect(f, grr.x, grr.y, grr.w, grr.h, radius_control(), th_panel_alt()); }
     draw_gear(f, gr.x + gr.w / 2, gr.y + gr.h / 2, th_text());
@@ -516,6 +526,7 @@ fn draw_menu_dropdown(a: *App) void {
         } else {
             let row: Rect = rect(dr.x + 4, y, dr.w - 8, ih);
             let hov: bool = rect_has(row, inp.*.mx, inp.*.my);
+            let _eid: i64 = ui_register(inp, "menuitem", it.label, it.label, row, true, false, false);
             if (hov) { fill_round_rect(f, row.x, row.y, row.w, row.h, radius_control(), th_accent()); }
             draw_text(f, row.x + 8, y + 6, it.label, th_text());
             if (it.hint.len > 0) {
@@ -760,6 +771,7 @@ fn draw_lib_card(a: *App, x: i32, y: i32, w: i32, ki: i32) i32 {
     let card: Rect = rect(x, y, w, 46);
     let armed: bool = a.*.tool == tool_place_base() + ki || a.*.lib_drag == ki;
     let hov: bool = hover(inp, card);
+    let _eid: i64 = ui_register(inp, "option", kind_name(k), kind_name(k), card, true, armed, false);
     let hot: i32 = input_hot(inp, ui_key(card), hov);
     let bgc: i64 = th_panel_alt();
     if (armed) { bgc = th_accent(); }
@@ -833,12 +845,13 @@ fn draw_toolbar(a: *App) void {
             let tr: Rect = rect(x + tcol_i * (tw + pad_text()), y + trow * (row_h() + 2), tw, row_h());
             let th_: bool = hover(inp, tr);
             let active: bool = a.*.lib_tab == t;
+            let tn: []u8 = library_tab_name(t);
+            let _eid: i64 = ui_register(inp, "tab", tn, tn, tr, true, active, false);
             let tbg: i64 = th_panel_alt();
             if (active) { tbg = th_accent(); }
             else if (th_) { tbg = th_header(); }
             fill_round_rect(f, tr.x, tr.y, tr.w, tr.h, radius_control(), tbg);
             if (active) { round_rect_outline(f, tr.x, tr.y, tr.w, tr.h, radius_control(), th_accent_hot()); }
-            let tn: []u8 = library_tab_name(t);
             let tncol: i64 = th_text_dim();
             if (active) { tncol = rgb(245, 247, 252); }
             else if (th_) { tncol = th_text(); }
@@ -1247,8 +1260,9 @@ fn outliner_group_row(a: *App, x: i32, y: i32, w: i32, gi: i32, label: []u8, cou
     let inp: *Input = &a.*.inp;
     let r: Rect = rect(x, y, w, 16);
     let hov: bool = hover(inp, r);
-    if (hov) { fill_round_rect(f, r.x, r.y, r.w, r.h, radius_control(), th_header()); }
     let open: bool = list.get[i32](a.*.expand, gi) == 1;
+    let _eid: i64 = ui_register(inp, "disclosure", label, label, r, true, open, false);
+    if (hov) { fill_round_rect(f, r.x, r.y, r.w, r.h, radius_control(), th_header()); }
     let arrow: []u8 = ">";
     if (open) { arrow = "v"; }
     draw_text(f, x + 4, y + 4, arrow, th_text_dim());
@@ -1274,6 +1288,8 @@ fn outliner_comp_row(a: *App, row: Rect, j: i32) void {
     let k: Kind = c.kind;
     let selr: bool = sel_has(a, c.id);
     let hov: bool = hover(inp, row);
+    let _eid: i64 = ui_register(inp, "treeitem", fmt_i(c.id as i64), c.name_,
+                                row, true, selr, false);
     if (selr) { fill_round_rect(f, row.x, row.y, row.w, row.h, radius_control(), th_accent()); }
     else if (hov) { fill_round_rect(f, row.x, row.y, row.w, row.h, radius_control(), th_header()); }
 
@@ -1456,6 +1472,8 @@ fn draw_outliner(a: *App) void {
                 let row: Rect = rect(x + 10, y, w - 10, 15);
                 let selr: bool = a.*.sel_guide == g.id;
                 let hov: bool = hover(inp, row);
+                let _eid: i64 = ui_register(inp, "treeitem", fmt_i(g.id as i64), "Waveguide",
+                                            row, true, selr, false);
                 if (selr) { fill_round_rect(f, row.x, row.y, row.w, row.h, radius_control(), th_accent()); }
                 else if (hov) { fill_round_rect(f, row.x, row.y, row.w, row.h, radius_control(), th_header()); }
                 fill_rect(f, row.x + 3, row.y + 4, 7, 7, trit_color(g.live));
@@ -1574,6 +1592,8 @@ fn draw_signal_row(a: *App, x: i32, y: i32, w: i32, comp_id: i32, label: []u8, t
         draw_text(f, lrect.x + text_w(label) + 4, y + 3, ds, th_accent_hot());
     }
     // clicking the label selects the part and lights its beam path in 3D
+    let _eid: i64 = ui_register(inp, "timelineitem", fmt_i(comp_id as i64), label,
+                                lrect, true, sel_has(a, comp_id), false);
     if (hover(inp, lrect) && btn_released(inp, 0)) {
         sel_set(a, comp_id);
         let found_g: i32 = 0 - 1;
@@ -2032,6 +2052,7 @@ fn draw_ctx_menu(a: *App) void {
         } else {
             let row: Rect = rect(dr.x + 4, y, dr.w - 8, ih);
             let hov: bool = rect_has(row, inp.*.mx, inp.*.my);
+            let _eid: i64 = ui_register(inp, "menuitem", it.label, it.label, row, true, false, false);
             if (hov) { fill_round_rect(f, row.x, row.y, row.w, row.h, radius_control(), th_accent()); }
             draw_text(f, row.x + pad_panel(), y + 6, it.label, th_text());
             if (it.hint.len > 0) {
@@ -2530,6 +2551,7 @@ fn draw_modal(a: *App) void {
             let nm: []u8 = list.get[[]u8](a.*.modal_files, i);
             let row: Rect = rect(r.x + 8, y, r.w - 16, 18);
             let hov: bool = rect_has(row, inp.*.mx, inp.*.my);
+            let _eid: i64 = ui_register(inp, "option", nm, nm, row, true, false, false);
             if (hov) { fill_rect(f, row.x, row.y, row.w, row.h, th_accent()); }
             draw_text(f, row.x + 6, y + 5, nm, th_text());
             if (hov && btn_released(inp, 0)) {
@@ -2672,6 +2694,88 @@ fn draw_access_state(a: *App) void {
             app_request_write_access(a);
         }
     }
+}
+
+fn draw_model_panel(a: *App) void {
+    if (!a.*.model_open) { return; }
+    let f: *FB = &a.*.f;
+    let inp: *Input = &a.*.inp;
+    let cap: i32 = inp.*.capture;
+    inp.*.capture = 0;
+    let pw: i32 = imin(780, inp.*.w - 24);
+    let ph: i32 = imin(570, inp.*.h - 48);
+    let pr: Rect = rect((inp.*.w - pw) / 2, (inp.*.h - ph) / 2, pw, ph);
+    draw_shadow(f, pr.x, pr.y, pr.w, pr.h, radius_panel());
+    fill_round_rect(f, pr.x, pr.y, pr.w, pr.h, radius_panel(), th_panel());
+    round_rect_outline(f, pr.x, pr.y, pr.w, pr.h, radius_panel(), th_outline());
+    draw_text(f, pr.x + 14, pr.y + 14, "PHYSICAL MODEL & PROVENANCE", th_text());
+    let schema_line: []u8 = _zag_str_concat("Pinned schema ", fmt_i(a.*.scene.*.model.schema_version as i64));
+    draw_text(f, pr.x + 14, pr.y + 31, schema_line, th_accent_hot());
+    draw_text(f, pr.x + 120, pr.y + 31, a.*.scene.*.model.id, th_text_dim());
+    if (model_can_migrate(a.*.scene.*.model, model_schema_current())) {
+        if (ui_button(f, inp, rect(pr.x + pr.w - 206, pr.y + 10, 112, 22), "Migrate to v2", true)) {
+            if (model_migrate(&a.*.scene.*.model, 2)) {
+                scene_mark_render(a.*.scene); app_mark_dirty(a); app_log(a, "physical model migrated to schema 2");
+            }
+        }
+    }
+    if (ui_button(f, inp, rect(pr.x + pr.w - 86, pr.y + 10, 72, 22), "Close", false)) {
+        a.*.model_open = false; inp.*.capture = cap; return;
+    }
+
+    draw_text(f, pr.x + 14, pr.y + 54, "VERSIONED DEVICE TYPES", th_text_dim());
+    let tw: i32 = (pr.w - 28) / 4;
+    let ti: i32 = 0;
+    while (ti < model_type_schema_count()) {
+        let d: DeviceTypeSchema = model_type_schema(ti);
+        let tx: i32 = pr.x + 14 + (ti % 4) * tw;
+        let ty: i32 = pr.y + 68 + (ti / 4) * 20;
+        let ts: []u8 = _zag_str_concat(_zag_str_concat(d.id, "  v"), fmt_i(d.version as i64));
+        draw_text(f, tx, ty + 4, ts, th_text());
+        ti = ti + 1;
+    }
+
+    let grid_y: i32 = pr.y + 116;
+    draw_text(f, pr.x + 14, grid_y, "PHYSICAL PARAMETERS", th_text_dim());
+    let cols: i32 = 3;
+    let cw: i32 = (pr.w - 28) / cols;
+    let pi: i32 = 0;
+    while (pi < model_param_count()) {
+        let col: i32 = pi % cols;
+        let row_i: i32 = pi / cols;
+        let rr: Rect = rect(pr.x + 14 + col * cw, grid_y + 14 + row_i * 25, cw - 6, 22);
+        let p: PhysicalParam = model_param_at(a.*.scene.*.model, pi);
+        let selected: bool = a.*.model_param_sel == pi;
+        let hov: bool = rect_has(rr, inp.*.mx, inp.*.my);
+        if (selected) { fill_round_rect(f, rr.x, rr.y, rr.w, rr.h, radius_control(), th_accent()); }
+        else if (hov) { fill_round_rect(f, rr.x, rr.y, rr.w, rr.h, radius_control(), th_header()); }
+        let _eid: i64 = ui_register(inp, "gridcell", model_param_name(pi), model_param_name(pi), rr,
+                                    true, selected, false);
+        draw_text_max(f, rr.x + 5, rr.y + 4, model_param_name(pi), th_text(), rr.w / 2);
+        let pv: []u8 = "Unknown";
+        if (p.known) { pv = _zag_str_concat(_zag_str_concat(fmt_f1(p.value), " "), p.units); }
+        let pvc: i64 = th_warning();
+        if (p.known) { pvc = th_text_dim(); }
+        draw_text_max(f, rr.x + rr.w / 2, rr.y + 4, pv, pvc, rr.w / 2 - 5);
+        if (hov && btn_released(inp, 0)) { a.*.model_param_sel = pi; }
+        pi = pi + 1;
+    }
+
+    let detail_y: i32 = grid_y + 14 + 9 * 25 + 8;
+    let dp: PhysicalParam = model_param_at(a.*.scene.*.model, a.*.model_param_sel);
+    hline(f, pr.x + 14, detail_y - 6, pr.w - 28, th_outline_soft());
+    draw_text(f, pr.x + 14, detail_y, model_param_name(a.*.model_param_sel), th_text());
+    let dpc: i64 = th_warning();
+    if (dp.known) { dpc = th_accent_hot(); }
+    draw_text(f, pr.x + 14, detail_y + 16,
+              _zag_str_concat(_zag_str_concat(evidence_class_name(dp.confidence), "  uncertainty ±"), fmt_f1(dp.uncertainty)), dpc);
+    draw_text(f, pr.x + 14, detail_y + 32, _zag_str_concat("Source: ", dp.source), th_text_dim());
+    draw_text(f, pr.x + 14, detail_y + 48, _zag_str_concat("Method: ", dp.method), th_text_dim());
+    draw_text(f, pr.x + pr.w - 270, detail_y + 32, _zag_str_concat("Version: ", dp.source_version), th_text_dim());
+    draw_text(f, pr.x + pr.w - 270, detail_y + 48, _zag_str_concat("Date: ", dp.date_), th_text_dim());
+
+    if (btn_pressed(inp, 0) && !rect_has(pr, inp.*.mx, inp.*.my)) { a.*.model_open = false; }
+    inp.*.capture = cap;
 }
 
 // ── frame orchestration ───────────────────────────────────────────────────────
@@ -3124,10 +3228,11 @@ fn app_frame(a: *App, dt: f64) void {
     a.*.inp.text_focus = false;
     a.*.inp.tip_text = "";
     a.*.inp.capture = 0;
+    ui_catalog_begin(&a.*.inp);
     input_focus_begin(&a.*.inp);
     // an open modal, menu, command palette, context menu, or optimizer/settings
     // panel owns the pointer: panels underneath go inert
-    if (a.*.modal != modal_none() || a.*.menu >= 0 || a.*.palette_open || a.*.flash_open ||
+    if (a.*.modal != modal_none() || a.*.menu >= 0 || a.*.palette_open || a.*.flash_open || a.*.model_open ||
         a.*.opt_open || a.*.settings_open || a.*.ctx_open) { a.*.inp.capture = 4; }
     if (a.*.inp.capture == 0) { app_splitters(a); }
     // a focused text field owns the keyboard (fields consume keys as they draw)
@@ -3152,7 +3257,7 @@ fn app_frame(a: *App, dt: f64) void {
     if (a.*.frame % opt_cadence_frames(a.*.opt) == 0 && !opt_quiet_now(a.*.opt) &&
         opt_should_run(a.*.opt.*.enabled, a.*.opt.*.suspended, a.*.moving, a.*.cam_drag,
                        a.*.grab != 0, a.*.menu >= 0, a.*.modal != modal_none(),
-                       a.*.sim.*.playing, a.*.opt_open || a.*.settings_open || a.*.palette_open || a.*.flash_open)) {
+                       a.*.sim.*.playing, a.*.opt_open || a.*.settings_open || a.*.palette_open || a.*.flash_open || a.*.model_open)) {
         let _oc: bool = opt_engine_refresh_keyed(a.*.opt, a.*.scene);
         if (a.*.opt.*.auto_apply && cap_allowed(cap_edit()) && a.*.opt.*.has_pending) {
             opt_apply_gui(a);   // journaled + audited, single-undo
@@ -3204,6 +3309,7 @@ fn app_frame(a: *App, dt: f64) void {
     draw_settings_panel(a);
     draw_opt_panel(a);
     draw_flash_panel(a);
+    draw_model_panel(a);
     draw_modal(a);
     draw_palette(a);
     draw_ctx_menu(a);

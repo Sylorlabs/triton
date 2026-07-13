@@ -185,6 +185,8 @@ fn agent_help() void {
     _zag_println("sim step [n] | sim reset | sim state | sim mode functional|physical | render <out.bmp>");
     _zag_println("status | coords | power | perf | kinds");
     _zag_println("flash import <program.fir> | flash verify");
+    _zag_println("ui list | ui screenshot <out.bmp> | ui activate <stable-id>");
+    _zag_println("model status | model migrate <version>");
     _zag_println("export <prefix>  (writes BOM, netlist, models, report)");
     _zag_println("trace <out.trace> <steps>  (deterministic engine trace)");
     _zag_println("diagnostics <out.txt>  (metadata only; excludes scene contents)");
@@ -254,6 +256,10 @@ fn agent_is_mutation(line: []u8, toks: *list.ArrayList[Tok]) bool {
         tok_eq(line, verb, "disconnect") || tok_eq(line, verb, "reroute") ||
         tok_eq(line, verb, "close") ||
         tok_eq(line, verb, "save") || tok_eq(line, verb, "open")) { return true; }
+    if (tok_eq(line, verb, "ui") && toks.*.len >= 2 &&
+        tok_eq(line, list.get[Tok](toks, 1), "activate")) { return true; }
+    if (tok_eq(line, verb, "model") && toks.*.len >= 2 &&
+        tok_eq(line, list.get[Tok](toks, 1), "migrate")) { return true; }
     return tok_eq(line, verb, "flash") && toks.*.len >= 2 &&
         tok_eq(line, list.get[Tok](toks, 1), "import");
 }
@@ -776,6 +782,86 @@ fn agent_render(a: *App, path: []u8) void {
     agent_ok1(msg);
 }
 
+fn agent_ui_refresh(a: *App) void {
+    a.*.ps_left.valid = false;
+    a.*.ps_right.valid = false;
+    a.*.ps_bottom.valid = false;
+    app_frame(a, 0.0);
+}
+
+fn agent_ui_list(a: *App) void {
+    agent_ui_refresh(a);
+    agent_ok0();
+    _zag_println("ui_schema 1");
+    _zag_print("screen "); _zag_print(_zag_i64_to_str(a.*.inp.w as i64));
+    _zag_print(" "); _zag_println(_zag_i64_to_str(a.*.inp.h as i64));
+    let i: i32 = 0;
+    while (i < a.*.inp.ui_elements.len) {
+        let e: UiElement = a.*.inp.ui_elements.data[i];
+        _zag_print("E id="); _zag_print(_zag_i64_to_str(e.id));
+        _zag_print(" role="); _zag_print(e.role);
+        _zag_print(" x="); _zag_print(_zag_i64_to_str(e.bounds.x as i64));
+        _zag_print(" y="); _zag_print(_zag_i64_to_str(e.bounds.y as i64));
+        _zag_print(" w="); _zag_print(_zag_i64_to_str(e.bounds.w as i64));
+        _zag_print(" h="); _zag_print(_zag_i64_to_str(e.bounds.h as i64));
+        _zag_print(" enabled="); if (e.enabled) { _zag_print("1"); } else { _zag_print("0"); }
+        _zag_print(" active="); if (e.active) { _zag_print("1"); } else { _zag_print("0"); }
+        _zag_print(" focused="); if (e.focused) { _zag_print("1"); } else { _zag_print("0"); }
+        _zag_print(" label="); _zag_println(e.label);
+        i = i + 1;
+    }
+    agent_dot();
+}
+
+fn agent_ui_activate(a: *App, id: i64) void {
+    agent_ui_refresh(a);
+    let idx: i32 = ui_find(&a.*.inp, id);
+    if (idx < 0) { agent_err("E_UI_ELEMENT unknown or not currently visible"); return; }
+    let e: UiElement = a.*.inp.ui_elements.data[idx];
+    if (!e.enabled || e.bounds.w <= 0 || e.bounds.h <= 0) {
+        agent_err("E_UI_DISABLED element is not actionable"); return;
+    }
+    a.*.inp.mx = e.bounds.x + e.bounds.w / 2;
+    a.*.inp.my = e.bounds.y + e.bounds.h / 2;
+    a.*.inp.prev_btn = 0; a.*.inp.btn = 1;
+    app_frame(a, 0.0);
+    a.*.inp.prev_btn = 1; a.*.inp.btn = 0;
+    app_frame(a, 0.0);
+    a.*.inp.prev_btn = 0; a.*.inp.keys.len = 0;
+    session_after_edit(a);
+    agent_mutation_ok(a, "UI element activated", 0 - 1);
+}
+
+fn agent_model(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
+    if (toks.*.len < 2 || tok_eq(line, list.get[Tok](toks, 1), "status")) {
+        agent_ok0();
+        _zag_print("schema="); _zag_print(_zag_i64_to_str(a.*.scene.*.model.schema_version as i64));
+        _zag_print(" current="); _zag_print(_zag_i64_to_str(model_schema_current() as i64));
+        _zag_print(" schema_complete="); if (model_schema_complete(a.*.scene.*.model)) { _zag_println("yes"); } else { _zag_println("no"); }
+        let i: i32 = 0;
+        while (i < model_type_schema_count()) {
+            let d: DeviceTypeSchema = model_type_schema(i);
+            _zag_print("TYPE id="); _zag_print(d.id);
+            _zag_print(" version="); _zag_print(_zag_i64_to_str(d.version as i64));
+            _zag_print(" parameters="); _zag_println(_zag_i64_to_str(d.parameter_count as i64));
+            i = i + 1;
+        }
+        agent_dot(); return;
+    }
+    if (tok_eq(line, list.get[Tok](toks, 1), "migrate")) {
+        if (toks.*.len < 3) { agent_err("usage: model migrate <version>"); return; }
+        let target: i32 = tok_i64(line, list.get[Tok](toks, 2)) as i32;
+        if (!model_migrate(&a.*.scene.*.model, target)) {
+            agent_err("E_MODEL_MIGRATION unsupported source/target pair"); return;
+        }
+        scene_mark_render(a.*.scene);
+        session_after_edit(a);
+        agent_mutation_ok(a, _zag_str_concat("model migrated schema=", _zag_i64_to_str(target as i64)), 0 - 1);
+        return;
+    }
+    agent_err("model: use status or migrate <version>");
+}
+
 fn agent_diagnostics(a: *App, path: []u8) void {
     let s0: []u8 = "triton_diagnostics_v1\nscene_contents=excluded_by_default\n";
     let s1: []u8 = _zag_str_concat(s0, "protocol=triton-agent-1\nrevision=");
@@ -807,9 +893,9 @@ fn agent_check_device_model_version(path: []u8) bool {
             let start: i32 = i;
             while (i < line.len && (line[i] as i32) != 32) { i = i + 1; }
             let schema: i64 = _zag_str_to_i64(line[start..i]);
-            if (schema != 1) {
+            if (schema < model_schema_min() || schema > model_schema_current()) {
                 let msg: []u8 = _zag_str_concat("E_MODEL_VERSION unsupported device model schema ", _zag_i64_to_str(schema));
-                agent_err(_zag_str_concat(msg, " expected 1"));
+                agent_err(_zag_str_concat(msg, " supported 1..2"));
                 return false;
             }
             return true;
@@ -846,6 +932,12 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
     if (tok_eq(line, verb, "render")) { required = cap_export(); }
     if (tok_eq(line, verb, "export")) { required = cap_export(); }
     if (tok_eq(line, verb, "diagnostics")) { required = cap_export(); }
+    if (tok_eq(line, verb, "ui") && toks.*.len >= 2 &&
+        tok_eq(line, list.get[Tok](toks, 1), "screenshot")) { required = cap_export(); }
+    if (tok_eq(line, verb, "ui") && toks.*.len >= 2 &&
+        tok_eq(line, list.get[Tok](toks, 1), "activate")) { required = cap_admin(); }
+    if (tok_eq(line, verb, "model") && toks.*.len >= 2 &&
+        tok_eq(line, list.get[Tok](toks, 1), "migrate")) { required = cap_edit(); }
     if (tok_eq(line, verb, "trace")) { required = cap_export(); }
     if (tok_eq(line, verb, "save")) { required = cap_save(); }
     if (tok_eq(line, verb, "test") || tok_eq(line, verb, "build")) { required = cap_execute(); }
@@ -1302,6 +1394,23 @@ fn agent_dispatch(a: *App, line: []u8, toks: *list.ArrayList[Tok]) void {
         agent_kinds();
         return;
     }
+    if (tok_eq(line, verb, "ui")) {
+        if (toks.*.len < 2) { agent_err("usage: ui list|screenshot <path>|activate <id>"); return; }
+        let sub: Tok = list.get[Tok](toks, 1);
+        if (tok_eq(line, sub, "list")) { agent_ui_list(a); return; }
+        if (tok_eq(line, sub, "screenshot")) {
+            if (toks.*.len < 3) { agent_err("usage: ui screenshot <path>"); return; }
+            let path: []u8 = tok_slice(line, list.get[Tok](toks, 2));
+            if (!agent_path_allowed(path)) { return; }
+            agent_render(a, path); return;
+        }
+        if (tok_eq(line, sub, "activate")) {
+            if (toks.*.len < 3) { agent_err("usage: ui activate <id>"); return; }
+            agent_ui_activate(a, tok_i64(line, list.get[Tok](toks, 2))); return;
+        }
+        agent_err("ui: use list, screenshot, or activate"); return;
+    }
+    if (tok_eq(line, verb, "model")) { agent_model(a, line, toks); return; }
     agent_err("unknown command (try help)");
 }
 

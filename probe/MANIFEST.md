@@ -35,6 +35,7 @@ in `probe/`. The `probe-manifest-audit` gate fails if any probe is unclassified.
 - `inspector_test.zag`
 - `json.zag`
 - `lifecycle_test.zag`
+- `model_schema_test.zag`
 - `limits_test.zag`
 - `list.zag`
 - `main.zag`
@@ -76,6 +77,7 @@ in `probe/`. The `probe-manifest-audit` gate fails if any probe is unclassified.
 - `timing_test.zag`
 - `ui.zag`
 - `ui_accessibility_test.zag`
+- `ui_agent_access_test.zag`
 - `layout_test.zag`
 - `ui_interactions_test.zag`
 - `ui_layers_test.zag`

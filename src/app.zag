@@ -124,6 +124,8 @@ struct App {
     palette_text: list.ArrayList[u8],
     palette_sel: i32,       // highlighted row in the filtered command list
     flash_open: bool,       // Flash FIR import/source/operation inspector
+    model_open: bool,       // versioned physical-model and provenance browser
+    model_param_sel: i32,
     flash_path: TextEdit,
     flash_raw: []u8,
     flash_tags: list.ArrayList[[]u8],
@@ -291,6 +293,8 @@ fn app_new(w: i32, h: i32) *App {
         .palette_text = list.make[u8](32),
         .palette_sel = 0,
         .flash_open = false,
+        .model_open = false,
+        .model_param_sel = 0,
         .flash_path = textedit_new(),
         .flash_raw = "",
         .flash_tags = list.make[[]u8](16),

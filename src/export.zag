@@ -64,6 +64,23 @@ fn export_models(s: *Scene, path: []u8) bool {
     ex_param(&out, "emitter_wavelength_min_nm", s.*.model.emitter_wavelength_min_nm);
     ex_param(&out, "emitter_wavelength_step_nm", s.*.model.emitter_wavelength_step_nm);
     ex_param(&out, "chamber_resonance_nm", s.*.model.chamber_resonance_nm);
+    ex_param(&out, "emitter_wavelength_max_nm", s.*.model.emitter_wavelength_max_nm);
+    ex_param(&out, "optical_bandwidth_ghz", s.*.model.optical_bandwidth_ghz);
+    ex_param(&out, "propagation_loss_db_cm", s.*.model.propagation_loss_db_cm);
+    ex_param(&out, "dispersion_ps_nm_km", s.*.model.dispersion_ps_nm_km);
+    ex_param(&out, "switching_response_ps", s.*.model.switching_response_ps);
+    ex_param(&out, "detector_response_ps", s.*.model.detector_response_ps);
+    ex_param(&out, "min_feature_nm", s.*.model.min_feature_nm);
+    ex_param(&out, "max_feature_nm", s.*.model.max_feature_nm);
+    ex_param(&out, "temperature_c", s.*.model.temperature_c);
+    ex_param(&out, "geometry_tolerance_nm", s.*.model.geometry_tolerance_nm);
+    ex_param(&out, "bend_radius_nm", s.*.model.bend_radius_nm);
+    ex_param(&out, "port_coupling_loss_db", s.*.model.port_coupling_loss_db);
+    ex_param(&out, "substrate_thickness_nm", s.*.model.substrate_thickness_nm);
+    ex_param(&out, "memory_retention_ps", s.*.model.memory_retention_ps);
+    ex_param(&out, "material_refractive_index", s.*.model.material_refractive_index);
+    ex_param(&out, "material_thermal_coefficient_ppm_c", s.*.model.material_thermal_coefficient_ppm_c);
+    ex_param(&out, "port_bandwidth_ghz", s.*.model.port_bandwidth_ghz);
     let ok: bool = atomic_write_file(path, out.data[0..out.len]); list.free[u8](&out); return ok;
 }
 

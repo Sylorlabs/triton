@@ -66,6 +66,33 @@ struct Rect {
     h: i32,
 }
 
+// Live accessibility/automation tree.  Widgets register the exact rectangle
+// they actually use for hit testing; agents therefore inspect the same target
+// the pointer and keyboard paths consume, rather than a duplicated layout map.
+// `id` is a deterministic hash of the semantic control key plus its duplicate
+// ordinal.  It is independent of window size and pixel coordinates.
+struct UiElement {
+    id: i64,
+    role: []u8,
+    label: []u8,
+    bounds: Rect,
+    enabled: bool,
+    active: bool,
+    focused: bool,
+    occurrence: i32,
+}
+
+fn ui_text_hash(s: []u8) i64 {
+    let h: i64 = 1469598103934665603;
+    let i: i32 = 0;
+    while (i < s.len) { h = (h ^ (s[i] as i64)) * 1099511628211; i = i + 1; }
+    return h;
+}
+
+fn ui_element_hash(role: []u8, key: []u8, occurrence: i32) i64 {
+    return (ui_text_hash(role) * 1099511628211) ^ ui_text_hash(key) ^ ((occurrence as i64) * 7919);
+}
+
 fn rect(x: i32, y: i32, w: i32, h: i32) Rect {
     return Rect{ .x = x, .y = y, .w = w, .h = h };
 }
@@ -109,6 +136,7 @@ struct Input {
     focus_cursor: i32,     // widget ordinal while drawing this frame
     focus_count_prev: i32, // traversal bound from the previous frame
     focus_nav: bool,       // force retained panels to enumerate on Tab frames
+    ui_elements: list.ArrayList[UiElement], // current visible automation tree
 }
 
 fn input_new() Input {
@@ -132,7 +160,54 @@ fn input_new() Input {
         .focus_cursor = 0,
         .focus_count_prev = 0,
         .focus_nav = false,
+        .ui_elements = list.make[UiElement](128),
     };
+}
+
+fn ui_catalog_begin(in: *Input) void { in.*.ui_elements.len = 0; }
+
+fn ui_register(in: *Input, role: []u8, key: []u8, label: []u8, r: Rect,
+               enabled: bool, active: bool, focused: bool) i64 {
+    let occurrence: i32 = 0;
+    let i: i32 = 0;
+    while (i < in.*.ui_elements.len) {
+        let e: UiElement = in.*.ui_elements.data[i];
+        if (_zag_strcmp(e.role, role) == 1 && _zag_strcmp(e.label, key) == 1) {
+            occurrence = occurrence + 1;
+        }
+        i = i + 1;
+    }
+    let id: i64 = ui_element_hash(role, key, occurrence);
+    list.push[UiElement](&in.*.ui_elements, UiElement{
+        .id = id, .role = role, .label = label, .bounds = r,
+        .enabled = enabled, .active = active, .focused = focused,
+        .occurrence = occurrence,
+    });
+    return id;
+}
+
+fn ui_find(in: *Input, id: i64) i32 {
+    let i: i32 = 0;
+    while (i < in.*.ui_elements.len) {
+        if (in.*.ui_elements.data[i].id == id) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// Labels may describe state (Run/Pause, On/Off) while identity must not. These
+// canonical keys keep IDs stable as a control changes state. Duplicate toggles
+// are disambiguated by their deterministic draw occurrence.
+fn ui_button_key(label: []u8) []u8 {
+    if (_zag_strcmp(label, "Run") == 1 || _zag_strcmp(label, "Pause") == 1) { return "run-pause"; }
+    if (_zag_strcmp(label, "On") == 1 || _zag_strcmp(label, "Off") == 1) { return "toggle"; }
+    if (_zag_strcmp(label, "Auto") == 1 || _zag_strcmp(label, "Manual") == 1) { return "auto-manual"; }
+    if (_zag_strcmp(label, "Quiet") == 1 || _zag_strcmp(label, "Active") == 1) { return "quiet-state"; }
+    if (_zag_strcmp(label, "Resume") == 1 || _zag_strcmp(label, "Running") == 1) { return "watchdog-state"; }
+    if (_zag_strcmp(label, "1x") == 1 || _zag_strcmp(label, "2x") == 1 || _zag_strcmp(label, "3x") == 1) { return "ui-scale"; }
+    if (_zag_strcmp(label, "Reduce") == 1 || _zag_strcmp(label, "Animate") == 1) { return "motion-state"; }
+    if (_zag_strcmp(label, "Snap") == 1 || _zag_strcmp(label, "Free") == 1) { return "snap-state"; }
+    return label;
 }
 
 // Stable per-widget key from its screen rect.
@@ -304,6 +379,7 @@ fn ui_panel(f: *FB, r: Rect, title: []u8) Rect {
 fn ui_button(f: *FB, in: *Input, r: Rect, label: []u8, active: bool) bool {
     let h: bool = hover(in, r);
     let focused: bool = ui_focusable(in, r, h);
+    let _eid: i64 = ui_register(in, "button", ui_button_key(label), label, r, true, active, focused);
     let hot: i32 = input_hot(in, ui_key(r), h);
     let col: i64 = th_panel_alt();
     if (active) { col = th_accent(); }
@@ -329,6 +405,7 @@ fn ui_button(f: *FB, in: *Input, r: Rect, label: []u8, active: bool) bool {
 fn ui_mini(f: *FB, in: *Input, r: Rect, label: []u8, tint: i64) bool {
     let h: bool = hover(in, r);
     let focused: bool = ui_focusable(in, r, h);
+    let _eid: i64 = ui_register(in, "button", "mini-control", label, r, true, false, focused);
     if (h) { fill_round_rect(f, r.x, r.y, r.w, r.h, radius_control(), th_header()); }
     draw_text(f, r.x + (r.w - text_w(label)) / 2, r.y + (r.h - 7) / 2, label, tint);
     if (focused) { round_rect_outline(f, r.x, r.y, r.w, r.h, radius_control(), th_focus()); }
@@ -366,6 +443,9 @@ fn textedit_text(te: *TextEdit) []u8 {
 fn ui_textfield(f: *FB, in: *Input, r: Rect, te: *TextEdit, placeholder: []u8) bool {
     let h: bool = hover(in, r);
     let focused: bool = ui_focusable(in, r, h);
+    let key: []u8 = placeholder;
+    if (key.len == 0) { key = "value"; }
+    let _eid: i64 = ui_register(in, "textbox", key, placeholder, r, true, te.*.focus, focused);
     if (btn_pressed(in, 0)) { te.*.focus = h; }
     if (focused && key_hit(in, 13)) { te.*.focus = true; }
     te.*.committed = false;
@@ -417,6 +497,7 @@ fn ui_section(f: *FB, in: *Input, x: i32, y: i32, w: i32, title: []u8, open: *i3
     let r: Rect = rect(x, y, w, row_h());
     let h: bool = hover(in, r);
     let focused: bool = ui_focusable(in, r, h);
+    let _eid: i64 = ui_register(in, "disclosure", title, title, r, true, open.* == 1, focused);
     let hot: i32 = input_hot(in, ui_key(r), h);
     if (hot > 0) { fill_round_rect(f, r.x, r.y, r.w, r.h, radius_control(), mix(th_header(), th_panel(), hot)); }
     let arrow: []u8 = ">";
@@ -472,6 +553,8 @@ fn ui_numfield(f: *FB, in: *Input, r: Rect, value: []u8, unit: []u8, flash_key: 
     let dp: bool = hover(in, plus);
     let fm: bool = ui_focusable(in, minus, dm);
     let fp: bool = ui_focusable(in, plus, dp);
+    let _em: i64 = ui_register(in, "spinbutton-decrement", "spin", "Decrease", minus, true, false, fm);
+    let _ep: i64 = ui_register(in, "spinbutton-increment", "spin", "Increase", plus, true, false, fp);
     if (dm) { fill_round_rect(f, minus.x, minus.y, minus.w, minus.h, radius_control(), th_header()); }
     if (dp) { fill_round_rect(f, plus.x, plus.y, plus.w, plus.h, radius_control(), th_header()); }
     round_rect_outline(f, r.x, r.y, r.w, r.h, radius_control(), th_outline());
@@ -487,6 +570,7 @@ fn ui_numfield(f: *FB, in: *Input, r: Rect, value: []u8, unit: []u8, flash_key: 
 // Horizontal slider; `dragging` persists across frames (0/1 flag in App).
 // Returns the updated value.
 fn ui_slider(f: *FB, in: *Input, r: Rect, value: f64, min_v: f64, max_v: f64, dragging: *i32) f64 {
+    let _eid: i64 = ui_register(in, "slider", "range", "Range", r, true, dragging.* == 1, false);
     let rad: i32 = r.h / 2;
     fill_round_rect(f, r.x, r.y, r.w, r.h, rad, th_panel_alt());
     let frac: f64 = (value - min_v) / (max_v - min_v);

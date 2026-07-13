@@ -462,6 +462,23 @@ fn mcp_tool_cmd(name: []u8, body: []u8, out: *list.ArrayList[u8]) bool {
         return true;
     }
     if (_zag_strcmp(name, "triton_flash_verify") == 1) { mcp_append(out, "flash verify"); return true; }
+    if (_zag_strcmp(name, "triton_ui_list") == 1) { mcp_append(out, "ui list"); return true; }
+    if (_zag_strcmp(name, "triton_ui_screenshot") == 1) {
+        let upath: []u8 = mcp_find_str(body, "path");
+        if (upath.len == 0) { return false; }
+        mcp_append(out, "ui screenshot "); mcp_append(out, upath); return true;
+    }
+    if (_zag_strcmp(name, "triton_ui_activate") == 1) {
+        let eid: []u8 = mcp_find_str(body, "element_id");
+        if (eid.len == 0) { return false; }
+        mcp_append(out, "ui activate "); mcp_append(out, eid); return true;
+    }
+    if (_zag_strcmp(name, "triton_model_status") == 1) { mcp_append(out, "model status"); return true; }
+    if (_zag_strcmp(name, "triton_model_migrate") == 1) {
+        let mv: i32 = mcp_find_int(body, "version");
+        if (mv < 1) { return false; }
+        mcp_append(out, "model migrate "); mcp_append(out, _zag_i64_to_str(mv as i64)); return true;
+    }
     if (_zag_strcmp(name, "triton_test") == 1) {
         let tname: []u8 = mcp_find_str(body, "name");
         if (tname.len == 0) { return false; }
@@ -510,6 +527,8 @@ fn mcp_tool_requires_envelope(name: []u8) bool {
     if (_zag_strcmp(name, "triton_save") == 1) { return true; }
     if (_zag_strcmp(name, "triton_open") == 1) { return true; }
     if (_zag_strcmp(name, "triton_flash_import") == 1) { return true; }
+    if (_zag_strcmp(name, "triton_ui_activate") == 1) { return true; }
+    if (_zag_strcmp(name, "triton_model_migrate") == 1) { return true; }
     return false;
 }
 
@@ -544,6 +563,11 @@ fn mcp_tools_list_json() []u8 {
     mcp_append_tool(&out, false, "triton_trace", "Export a deterministic simulation trace.", "\"path\":{\"type\":\"string\"},\"steps\":{\"type\":\"integer\",\"minimum\":1}", "\"path\",\"steps\"", false);
     mcp_append_tool(&out, false, "triton_flash_import", "Import Flash FIR into a photonic project through the production builder.", "\"path\":{\"type\":\"string\"}", "\"path\"", true);
     mcp_append_tool(&out, false, "triton_flash_verify", "Verify the active Flash photonic import against its oracle.", "", "", false);
+    mcp_append_tool(&out, false, "triton_ui_list", "Inspect every currently visible control with stable element ID, role, state, and exact click bounds.", "", "", false);
+    mcp_append_tool(&out, false, "triton_ui_screenshot", "Capture the same UI state described by triton_ui_list.", "\"path\":{\"type\":\"string\"}", "\"path\"", false);
+    mcp_append_tool(&out, false, "triton_ui_activate", "Activate a visible UI control by stable element ID through its real pointer target.", "\"element_id\":{\"type\":\"string\"}", "\"element_id\"", true);
+    mcp_append_tool(&out, false, "triton_model_status", "Inspect pinned physical-model schema and all versioned device-type descriptors.", "", "", false);
+    mcp_append_tool(&out, false, "triton_model_migrate", "Explicitly migrate a pinned physical-model schema without inventing new evidence.", "\"version\":{\"type\":\"integer\",\"minimum\":2,\"maximum\":2}", "\"version\"", true);
     mcp_append_tool(&out, false, "triton_test", "Run engine|smoke|build verification.", "\"name\":{\"type\":\"string\",\"enum\":[\"engine\",\"smoke\",\"build\"]}", "\"name\"", false);
     mcp_append_tool(&out, false, "triton_status", "Design and simulation status.", "", "", false);
     mcp_append_tool(&out, false, "triton_coords", "Component origins and port coordinates.", "", "", false);

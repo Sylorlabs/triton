@@ -251,7 +251,7 @@ fn main() i32 {
         scene_cell_owner(s2, s.*.comps.data[0].origin) == s.*.comps.data[0].id, &fails);
     check("roundtrip: placement still enforced",
         scene_can_place(s2, Kind.Chamber, vox(3, 1, 3), 0) == 1, &fails);
-    check("roundtrip: device model version pinned", s2.*.model.schema_version == 1, &fails);
+    check("roundtrip: device model version pinned", s2.*.model.schema_version == model_schema_current(), &fails);
     check("roundtrip: physical model values preserved",
         s2.*.model.pitch_nm.value == s.*.model.pitch_nm.value &&
         s2.*.model.emitter_rate_ghz.value == s.*.model.emitter_rate_ghz.value, &fails);

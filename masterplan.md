@@ -188,11 +188,16 @@ hardware, kernel, firmware, driver, display role, and date.
 
 ### 5.1 Versioned Device Models
 
-- [ ] Define a versioned schema for emitters, waveguides, chambers, memory tiles,
-      detectors, substrates, ports, and material stacks.
-- [ ] Represent wavelength range, bandwidth, propagation loss, group index,
+- [x] Define a versioned schema for emitters, waveguides, chambers, memory tiles,
+      detectors, substrates, ports, and material stacks. Evidence:
+      `DeviceTypeSchema` exposes all eight v2 device families with stable IDs and
+      parameter counts; `model-schema-migration` asserts the complete set.
+- [x] Represent wavelength range, bandwidth, propagation loss, group index,
       dispersion, switching response, detector response, geometry limits,
       temperature assumptions, tolerances, and uncertainty where applicable.
+      Evidence: schema v2 carries 25 unit/provenance-bearing `PhysicalParam`
+      values with load-time unit, range, and cross-field validation; the Physical
+      Model & Provenance browser displays every parameter and its evidence.
 - [x] Attach a provenance record to every physical parameter: source, source
       version, date, method, units, uncertainty, and confidence class. Evidence:
       `PhysicalParam` carries all of `{value, units, source, source_version, date_,
@@ -212,8 +217,13 @@ hardware, kernel, firmware, driver, display role, and date.
       projects (reference PCU) still load (`flash-photonic`, `engine`).
 - [x] Reject incompatible device-model versions with an actionable diagnostic.
       Evidence: `device-model-version` verifies opening a project with device
-      model schema `99` returns stable `E_MODEL_VERSION ... expected 1`.
-- [ ] Allow projects to pin and migrate model versions explicitly.
+      model schema `99` returns stable `E_MODEL_VERSION ... supported 1..2`.
+- [x] Allow projects to pin and migrate model versions explicitly. Evidence:
+      project `m` records preserve schema 1 or 2; legacy v1 loads remain pinned,
+      Help → Physical Model & Provenance offers an explicit migration, and
+      `model migrate 2` provides the revision-checked agent path. Migration
+      preserves existing values and marks new fields Unknown;
+      `model-schema-migration` verifies save/reload and known-mask preservation.
 - [x] Display provenance and uncertainty in the inspector. Evidence:
       `draw_provenance` shows value/units, confidence class + uncertainty, and
       source · date for the selected component's model parameter (via
@@ -1717,8 +1727,15 @@ The standard should be: **Triton looks like a designer and CAD engineer built it
       Flash FIR Workspace provides a keyboard-editable path, bounded Import,
       Run/Pause/Step/Reset, source view, per-op trace, verification state, and an
       explicit software-only evidence label; `reference-pcu-ui`.
-- [ ] Give explicitly authorized agents schema-described access to every UI
+- [x] Give explicitly authorized agents schema-described access to every UI
       control, screenshot, stable element ID, accurate click target, and state.
+      Evidence: widgets and custom CAD controls populate the live `ui_schema 1`
+      catalog with semantic role, stable coordinate-independent ID, exact bounds,
+      enabled/active/focused state, and label. `ui list`, `ui screenshot`, and the
+      admin + idempotency + revision guarded `ui activate` command share the real
+      frame and pointer path; MCP advertises dedicated schemas. `ui-agent-access`
+      verifies catalog breadth, bounds, ID stability across resize, activation,
+      all 25 physical-model cells, and matching screenshot output.
 - [x] Complete Flash documentation and release evidence without overstating
       emulated photonic execution as fabricated-hardware validation. Evidence:
       `docs/FLASH_UI.md` documents the visible workflow, bounded/error behavior,

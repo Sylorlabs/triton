@@ -1,0 +1,75 @@
+// model_schema_test.zag — Phase B versioned physical schemas, full parameter
+// surface, explicit pinning, and conservative v1 -> v2 migration.
+
+@import("../src/editops.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn provenance_ok(p: PhysicalParam) bool {
+    if (!p.known) { return p.confidence == EvidenceClass.Unknown && p.units.len > 0; }
+    return p.units.len > 0 && p.source.len > 0 && p.source_version.len > 0 &&
+        p.date_.len > 0 && p.method.len > 0;
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let m: DeviceModel = model_reference_illustrative();
+    check("current model schema is v2", model_schema_current() == 2 && m.schema_version == 2, &failures);
+    check("all eight physical device families have v2 schemas", model_type_schema_count() == 8, &failures);
+    let i: i32 = 0;
+    let schemas_ok: bool = true;
+    while (i < model_type_schema_count()) {
+        let d: DeviceTypeSchema = model_type_schema(i);
+        if (d.id.len == 0 || d.version != 2 || d.parameter_count <= 0) { schemas_ok = false; }
+        i = i + 1;
+    }
+    check("emitter waveguide chamber memory detector substrate port and material schemas are described", schemas_ok, &failures);
+
+    check("v2 exposes wavelength bandwidth loss index dispersion response geometry temperature tolerance and uncertainty inputs",
+        model_param_count() == 25 && m.emitter_wavelength_max_nm.known &&
+        m.optical_bandwidth_ghz.known && m.propagation_loss_db_cm.known &&
+        m.group_index.known && m.dispersion_ps_nm_km.known &&
+        m.switching_response_ps.known && m.detector_response_ps.known &&
+        m.min_feature_nm.known && m.max_feature_nm.known && m.temperature_c.known &&
+        m.geometry_tolerance_nm.known && m.port_bandwidth_ghz.known, &failures);
+    let all_prov: bool = true;
+    i = 0;
+    while (i < model_param_count()) {
+        if (!provenance_ok(model_param_at(m, i))) { all_prov = false; }
+        i = i + 1;
+    }
+    check("every v2 parameter has units and provenance", all_prov && model_schema_complete(m), &failures);
+
+    let bad: DeviceModel = model_reference_illustrative();
+    bad.emitter_wavelength_max_nm.value = bad.emitter_wavelength_min_nm.value - 1.0;
+    check("cross-field wavelength bounds are validated", !model_units_dims_valid(bad), &failures);
+    let bad2: DeviceModel = model_reference_illustrative();
+    bad2.max_feature_nm.value = bad2.min_feature_nm.value - 1.0;
+    check("cross-field geometry limits are validated", !model_units_dims_valid(bad2), &failures);
+
+    let v1: DeviceModel = model_reference_illustrative();
+    model_prepare_schema1(&v1);
+    let old_group: f64 = v1.group_index.value;
+    check("legacy project can remain explicitly pinned to v1", v1.schema_version == 1 && !model_schema_complete(v1), &failures);
+    check("only an explicit v1 to v2 migration is offered", model_can_migrate(v1, 2) && !model_can_migrate(v1, 1), &failures);
+    check("explicit migration succeeds", model_migrate(&v1, 2) && v1.schema_version == 2, &failures);
+    check("migration preserves authored values and does not invent new evidence",
+        v1.group_index.value == old_group && !v1.propagation_loss_db_cm.known &&
+        v1.propagation_loss_db_cm.confidence == EvidenceClass.Unknown, &failures);
+
+    let s: *Scene = scene_new();
+    s.*.model = v1;
+    let path: []u8 = "/tmp/prism_model_migrated.zpa";
+    check("migrated pinned model saves", design_save(s, path), &failures);
+    let s2: *Scene = scene_new();
+    check("migrated model reloads", design_load_into(s2, path), &failures);
+    check("schema pin and Unknown masks survive round trip",
+        s2.*.model.schema_version == 2 && !s2.*.model.propagation_loss_db_cm.known &&
+        s2.*.model.group_index.value == old_group, &failures);
+
+    if (failures == 0) { _zag_println("MODEL SCHEMA: ALL PASS"); return 0; }
+    _zag_println("MODEL SCHEMA: FAILURES"); return 1;
+}

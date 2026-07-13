@@ -25,6 +25,12 @@ based on commit count and they do not imply unrun hardware certification.
   placement, deletion, inspection, export, trace, and Flash import/verification.
   Evidence: `mcp-mutation-envelope`, `mcp-specialized-mutations`,
   `mcp-tool-coverage`.
+- The live UI exposes schema-described controls, stable IDs, exact bounds, state,
+  screenshot capture, and guarded activation through native agent and MCP paths.
+  Evidence: `ui-agent-access`.
+- Physical-model schema v2 covers eight device families and 25 provenance-bearing
+  inputs; legacy v1 projects remain pinned until explicitly migrated without
+  invented evidence. Evidence: `model-schema-migration`, `provenance-units`.
 - Unauthorized mutation attempts and outside-root writes are rejected without
   changing project bytes or creating forbidden outputs. Evidence:
   `agent-capability-denial`, `agent-path-confinement`.

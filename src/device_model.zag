@@ -34,6 +34,81 @@ struct DeviceModel {
     emitter_wavelength_min_nm: PhysicalParam,
     emitter_wavelength_step_nm: PhysicalParam,
     chamber_resonance_nm: PhysicalParam,
+    emitter_wavelength_max_nm: PhysicalParam,
+    optical_bandwidth_ghz: PhysicalParam,
+    propagation_loss_db_cm: PhysicalParam,
+    dispersion_ps_nm_km: PhysicalParam,
+    switching_response_ps: PhysicalParam,
+    detector_response_ps: PhysicalParam,
+    min_feature_nm: PhysicalParam,
+    max_feature_nm: PhysicalParam,
+    temperature_c: PhysicalParam,
+    geometry_tolerance_nm: PhysicalParam,
+    bend_radius_nm: PhysicalParam,
+    port_coupling_loss_db: PhysicalParam,
+    substrate_thickness_nm: PhysicalParam,
+    memory_retention_ps: PhysicalParam,
+    material_refractive_index: PhysicalParam,
+    material_thermal_coefficient_ppm_c: PhysicalParam,
+    port_bandwidth_ghz: PhysicalParam,
+}
+
+fn model_schema_current() i32 { return 2; }
+fn model_schema_min() i32 { return 1; }
+
+// Public schema descriptor used by the UI and agent API.  Every physical part
+// family has a versioned record even when a particular parameter is Unknown.
+struct DeviceTypeSchema {
+    id: []u8,
+    version: i32,
+    parameter_count: i32,
+}
+
+fn model_type_schema(index: i32) DeviceTypeSchema {
+    return switch (index) {
+        0 => DeviceTypeSchema{ .id = "emitter", .version = 2, .parameter_count = 7 },
+        1 => DeviceTypeSchema{ .id = "waveguide", .version = 2, .parameter_count = 7 },
+        2 => DeviceTypeSchema{ .id = "chamber", .version = 2, .parameter_count = 6 },
+        3 => DeviceTypeSchema{ .id = "memory-tile", .version = 2, .parameter_count = 5 },
+        4 => DeviceTypeSchema{ .id = "detector", .version = 2, .parameter_count = 6 },
+        5 => DeviceTypeSchema{ .id = "substrate", .version = 2, .parameter_count = 6 },
+        6 => DeviceTypeSchema{ .id = "port", .version = 2, .parameter_count = 4 },
+        else => DeviceTypeSchema{ .id = "material-stack", .version = 2, .parameter_count = 7 },
+    };
+}
+
+fn model_type_schema_count() i32 { return 8; }
+
+fn model_param_count() i32 { return 25; }
+
+fn model_param_name(index: i32) []u8 {
+    return switch (index) {
+        0 => "Lattice pitch", 1 => "Group index", 2 => "Emitter rate",
+        3 => "Chamber rate", 4 => "Detector rate", 5 => "Wavelength min",
+        6 => "Wavelength step", 7 => "Chamber resonance", 8 => "Wavelength max",
+        9 => "Optical bandwidth", 10 => "Propagation loss", 11 => "Dispersion",
+        12 => "Switch response", 13 => "Detector response", 14 => "Minimum feature",
+        15 => "Maximum feature", 16 => "Temperature", 17 => "Geometry tolerance",
+        18 => "Bend radius", 19 => "Port coupling loss", 20 => "Substrate thickness",
+        21 => "Memory retention", 22 => "Material index", 23 => "Thermal coefficient",
+        else => "Port bandwidth",
+    };
+}
+
+fn model_param_at(m: DeviceModel, index: i32) PhysicalParam {
+    return switch (index) {
+        0 => m.pitch_nm, 1 => m.group_index, 2 => m.emitter_rate_ghz,
+        3 => m.chamber_rate_ghz, 4 => m.detector_rate_ghz,
+        5 => m.emitter_wavelength_min_nm, 6 => m.emitter_wavelength_step_nm,
+        7 => m.chamber_resonance_nm, 8 => m.emitter_wavelength_max_nm,
+        9 => m.optical_bandwidth_ghz, 10 => m.propagation_loss_db_cm,
+        11 => m.dispersion_ps_nm_km, 12 => m.switching_response_ps,
+        13 => m.detector_response_ps, 14 => m.min_feature_nm, 15 => m.max_feature_nm,
+        16 => m.temperature_c, 17 => m.geometry_tolerance_nm, 18 => m.bend_radius_nm,
+        19 => m.port_coupling_loss_db, 20 => m.substrate_thickness_nm,
+        21 => m.memory_retention_ps, 22 => m.material_refractive_index,
+        23 => m.material_thermal_coefficient_ppm_c, else => m.port_bandwidth_ghz,
+    };
 }
 
 fn physical_param(value: f64, units: []u8, method: []u8) PhysicalParam {
@@ -55,8 +130,8 @@ fn physical_unknown(units: []u8) PhysicalParam {
 
 fn model_reference_illustrative() DeviceModel {
     return DeviceModel{
-        .schema_version = 1,
-        .id = "triton.reference.illustrative.v1",
+        .schema_version = 2,
+        .id = "triton.reference.illustrative.v2",
         .pitch_nm = physical_param(250.0, "nm", "illustrative CAD lattice"),
         .group_index = physical_param(2.1, "1", "illustrative waveguide model"),
         .emitter_rate_ghz = physical_param(110.0, "GHz", "illustrative EO response"),
@@ -65,6 +140,23 @@ fn model_reference_illustrative() DeviceModel {
         .emitter_wavelength_min_nm = physical_param(1530.0, "nm", "illustrative C-band channel plan"),
         .emitter_wavelength_step_nm = physical_param(0.8, "nm", "illustrative WDM spacing"),
         .chamber_resonance_nm = physical_param(1550.0, "nm", "illustrative cavity resonance"),
+        .emitter_wavelength_max_nm = physical_param(1565.0, "nm", "illustrative C-band upper bound"),
+        .optical_bandwidth_ghz = physical_param(50.0, "GHz", "illustrative usable optical bandwidth"),
+        .propagation_loss_db_cm = physical_param(1.0, "dB/cm", "illustrative waveguide attenuation"),
+        .dispersion_ps_nm_km = physical_param(10.0, "ps/(nm*km)", "illustrative group-velocity dispersion"),
+        .switching_response_ps = physical_param(4.0, "ps", "illustrative electro-optic response"),
+        .detector_response_ps = physical_param(5.0, "ps", "illustrative detector impulse response"),
+        .min_feature_nm = physical_param(80.0, "nm", "illustrative process minimum feature"),
+        .max_feature_nm = physical_param(100000.0, "nm", "illustrative die geometry bound"),
+        .temperature_c = physical_param(25.0, "degC", "illustrative nominal operating temperature"),
+        .geometry_tolerance_nm = physical_param(5.0, "nm", "illustrative process tolerance"),
+        .bend_radius_nm = physical_param(5000.0, "nm", "illustrative minimum waveguide bend"),
+        .port_coupling_loss_db = physical_param(0.5, "dB", "illustrative port insertion loss"),
+        .substrate_thickness_nm = physical_param(220000.0, "nm", "illustrative substrate thickness"),
+        .memory_retention_ps = physical_param(1000.0, "ps", "illustrative optical memory retention"),
+        .material_refractive_index = physical_param(3.48, "1", "illustrative material refractive index"),
+        .material_thermal_coefficient_ppm_c = physical_param(1.86, "ppm/degC", "illustrative thermo-optic coefficient"),
+        .port_bandwidth_ghz = physical_param(80.0, "GHz", "illustrative port bandwidth"),
     };
 }
 
@@ -73,6 +165,21 @@ fn model_complete(m: DeviceModel) bool {
         m.emitter_rate_ghz.known && m.chamber_rate_ghz.known &&
         m.detector_rate_ghz.known && m.emitter_wavelength_min_nm.known &&
         m.emitter_wavelength_step_nm.known && m.chamber_resonance_nm.known;
+}
+
+// Full characterization is distinct from the minimum inputs consumed by the
+// current simulator. A pinned v1 project can still simulate its established
+// model while v2-only parameters remain visibly Unknown.
+fn model_schema_complete(m: DeviceModel) bool {
+    return model_complete(m) &&
+        m.emitter_wavelength_max_nm.known && m.optical_bandwidth_ghz.known &&
+        m.propagation_loss_db_cm.known && m.dispersion_ps_nm_km.known &&
+        m.switching_response_ps.known && m.detector_response_ps.known &&
+        m.min_feature_nm.known && m.max_feature_nm.known && m.temperature_c.known &&
+        m.geometry_tolerance_nm.known && m.bend_radius_nm.known &&
+        m.port_coupling_loss_db.known && m.substrate_thickness_nm.known &&
+        m.memory_retention_ps.known && m.material_refractive_index.known &&
+        m.material_thermal_coefficient_ppm_c.known && m.port_bandwidth_ghz.known;
 }
 
 fn evidence_class_name(c: EvidenceClass) []u8 {
@@ -87,7 +194,7 @@ fn evidence_class_name(c: EvidenceClass) []u8 {
 }
 
 fn model_validate(m: DeviceModel) bool {
-    if (m.schema_version != 1) { return false; }
+    if (m.schema_version < model_schema_min() || m.schema_version > model_schema_current()) { return false; }
     if (!model_complete(m)) { return true; }
     return m.pitch_nm.value > 0.0 && m.group_index.value >= 1.0 &&
         m.emitter_rate_ghz.value > 0.0 && m.chamber_rate_ghz.value > 0.0 &&
@@ -115,7 +222,7 @@ fn param_dim_ok(p: PhysicalParam, exp_units: []u8, lo: f64, hi: f64) bool {
 // carry the correct unit string and, when known, a physically plausible value.
 // Rejects e.g. a group index below 1 or a wavelength outside the optical range.
 fn model_units_dims_valid(m: DeviceModel) bool {
-    return param_dim_ok(m.pitch_nm, "nm", 1.0, 100000.0) &&
+    let base: bool = param_dim_ok(m.pitch_nm, "nm", 1.0, 100000.0) &&
         param_dim_ok(m.group_index, "1", 1.0, 10.0) &&
         param_dim_ok(m.emitter_rate_ghz, "GHz", 0.001, 100000.0) &&
         param_dim_ok(m.chamber_rate_ghz, "GHz", 0.001, 100000.0) &&
@@ -123,6 +230,27 @@ fn model_units_dims_valid(m: DeviceModel) bool {
         param_dim_ok(m.emitter_wavelength_min_nm, "nm", 100.0, 100000.0) &&
         param_dim_ok(m.emitter_wavelength_step_nm, "nm", 0.0001, 1000.0) &&
         param_dim_ok(m.chamber_resonance_nm, "nm", 100.0, 100000.0);
+    if (!base || m.schema_version == 1) { return base; }
+    return param_dim_ok(m.emitter_wavelength_max_nm, "nm", 100.0, 100000.0) &&
+        param_dim_ok(m.optical_bandwidth_ghz, "GHz", 0.001, 100000.0) &&
+        param_dim_ok(m.propagation_loss_db_cm, "dB/cm", 0.0, 100000.0) &&
+        param_dim_ok(m.dispersion_ps_nm_km, "ps/(nm*km)", 0.0, 1000000.0) &&
+        param_dim_ok(m.switching_response_ps, "ps", 0.0001, 1000000000.0) &&
+        param_dim_ok(m.detector_response_ps, "ps", 0.0001, 1000000000.0) &&
+        param_dim_ok(m.min_feature_nm, "nm", 0.01, 1000000000.0) &&
+        param_dim_ok(m.max_feature_nm, "nm", 0.01, 1000000000.0) &&
+        param_dim_ok(m.temperature_c, "degC", -273.15, 10000.0) &&
+        param_dim_ok(m.geometry_tolerance_nm, "nm", 0.0, 1000000000.0) &&
+        param_dim_ok(m.bend_radius_nm, "nm", 0.0, 1000000000.0) &&
+        param_dim_ok(m.port_coupling_loss_db, "dB", 0.0, 100000.0) &&
+        param_dim_ok(m.substrate_thickness_nm, "nm", 0.01, 10000000000.0) &&
+        param_dim_ok(m.memory_retention_ps, "ps", 0.0, 1000000000000.0) &&
+        param_dim_ok(m.material_refractive_index, "1", 1.0, 20.0) &&
+        param_dim_ok(m.material_thermal_coefficient_ppm_c, "ppm/degC", -1000000.0, 1000000.0) &&
+        param_dim_ok(m.port_bandwidth_ghz, "GHz", 0.001, 100000.0) &&
+        (!m.emitter_wavelength_min_nm.known || !m.emitter_wavelength_max_nm.known ||
+         m.emitter_wavelength_max_nm.value >= m.emitter_wavelength_min_nm.value) &&
+        (!m.min_feature_nm.known || !m.max_feature_nm.known || m.max_feature_nm.value >= m.min_feature_nm.value);
 }
 
 fn model_known_mask(m: DeviceModel) i64 {
@@ -135,6 +263,23 @@ fn model_known_mask(m: DeviceModel) i64 {
     if (m.emitter_wavelength_min_nm.known) { mask = mask | 32; }
     if (m.emitter_wavelength_step_nm.known) { mask = mask | 64; }
     if (m.chamber_resonance_nm.known) { mask = mask | 128; }
+    if (m.emitter_wavelength_max_nm.known) { mask = mask | 256; }
+    if (m.optical_bandwidth_ghz.known) { mask = mask | 512; }
+    if (m.propagation_loss_db_cm.known) { mask = mask | 1024; }
+    if (m.dispersion_ps_nm_km.known) { mask = mask | 2048; }
+    if (m.switching_response_ps.known) { mask = mask | 4096; }
+    if (m.detector_response_ps.known) { mask = mask | 8192; }
+    if (m.min_feature_nm.known) { mask = mask | 16384; }
+    if (m.max_feature_nm.known) { mask = mask | 32768; }
+    if (m.temperature_c.known) { mask = mask | 65536; }
+    if (m.geometry_tolerance_nm.known) { mask = mask | 131072; }
+    if (m.bend_radius_nm.known) { mask = mask | 262144; }
+    if (m.port_coupling_loss_db.known) { mask = mask | 524288; }
+    if (m.substrate_thickness_nm.known) { mask = mask | 1048576; }
+    if (m.memory_retention_ps.known) { mask = mask | 2097152; }
+    if (m.material_refractive_index.known) { mask = mask | 4194304; }
+    if (m.material_thermal_coefficient_ppm_c.known) { mask = mask | 8388608; }
+    if (m.port_bandwidth_ghz.known) { mask = mask | 16777216; }
     return mask;
 }
 
@@ -147,4 +292,56 @@ fn model_apply_known_mask(m: *DeviceModel, mask: i64) void {
     m.*.emitter_wavelength_min_nm.known = (mask & 32) != 0;
     m.*.emitter_wavelength_step_nm.known = (mask & 64) != 0;
     m.*.chamber_resonance_nm.known = (mask & 128) != 0;
+    m.*.emitter_wavelength_max_nm.known = (mask & 256) != 0;
+    m.*.optical_bandwidth_ghz.known = (mask & 512) != 0;
+    m.*.propagation_loss_db_cm.known = (mask & 1024) != 0;
+    m.*.dispersion_ps_nm_km.known = (mask & 2048) != 0;
+    m.*.switching_response_ps.known = (mask & 4096) != 0;
+    m.*.detector_response_ps.known = (mask & 8192) != 0;
+    m.*.min_feature_nm.known = (mask & 16384) != 0;
+    m.*.max_feature_nm.known = (mask & 32768) != 0;
+    m.*.temperature_c.known = (mask & 65536) != 0;
+    m.*.geometry_tolerance_nm.known = (mask & 131072) != 0;
+    m.*.bend_radius_nm.known = (mask & 262144) != 0;
+    m.*.port_coupling_loss_db.known = (mask & 524288) != 0;
+    m.*.substrate_thickness_nm.known = (mask & 1048576) != 0;
+    m.*.memory_retention_ps.known = (mask & 2097152) != 0;
+    m.*.material_refractive_index.known = (mask & 4194304) != 0;
+    m.*.material_thermal_coefficient_ppm_c.known = (mask & 8388608) != 0;
+    m.*.port_bandwidth_ghz.known = (mask & 16777216) != 0;
+}
+
+fn model_prepare_schema1(m: *DeviceModel) void {
+    m.*.schema_version = 1;
+    m.*.id = "triton.project.pinned.v1";
+    m.*.emitter_wavelength_max_nm = physical_unknown("nm");
+    m.*.optical_bandwidth_ghz = physical_unknown("GHz");
+    m.*.propagation_loss_db_cm = physical_unknown("dB/cm");
+    m.*.dispersion_ps_nm_km = physical_unknown("ps/(nm*km)");
+    m.*.switching_response_ps = physical_unknown("ps");
+    m.*.detector_response_ps = physical_unknown("ps");
+    m.*.min_feature_nm = physical_unknown("nm");
+    m.*.max_feature_nm = physical_unknown("nm");
+    m.*.temperature_c = physical_unknown("degC");
+    m.*.geometry_tolerance_nm = physical_unknown("nm");
+    m.*.bend_radius_nm = physical_unknown("nm");
+    m.*.port_coupling_loss_db = physical_unknown("dB");
+    m.*.substrate_thickness_nm = physical_unknown("nm");
+    m.*.memory_retention_ps = physical_unknown("ps");
+    m.*.material_refractive_index = physical_unknown("1");
+    m.*.material_thermal_coefficient_ppm_c = physical_unknown("ppm/degC");
+    m.*.port_bandwidth_ghz = physical_unknown("GHz");
+}
+
+fn model_can_migrate(m: DeviceModel, target: i32) bool {
+    return m.schema_version == 1 && target == 2;
+}
+
+// Migration is deliberately lossless and conservative: v1 values remain as
+// authored and new v2 fields become Unknown until a user supplies evidence.
+fn model_migrate(m: *DeviceModel, target: i32) bool {
+    if (!model_can_migrate(m.*, target)) { return false; }
+    m.*.schema_version = 2;
+    m.*.id = "triton.project.migrated.v2";
+    return true;
 }

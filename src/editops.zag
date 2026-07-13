@@ -1082,6 +1082,23 @@ fn design_save(s: *Scene, path: []u8) bool {
     ser_int(&out, (s.*.model.emitter_wavelength_min_nm.value * 1000.0) as i64);
     ser_int(&out, (s.*.model.emitter_wavelength_step_nm.value * 1000000.0) as i64);
     ser_int(&out, (s.*.model.chamber_resonance_nm.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.emitter_wavelength_max_nm.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.optical_bandwidth_ghz.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.propagation_loss_db_cm.value * 1000000.0) as i64);
+    ser_int(&out, (s.*.model.dispersion_ps_nm_km.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.switching_response_ps.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.detector_response_ps.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.min_feature_nm.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.max_feature_nm.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.temperature_c.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.geometry_tolerance_nm.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.bend_radius_nm.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.port_coupling_loss_db.value * 1000000.0) as i64);
+    ser_int(&out, (s.*.model.substrate_thickness_nm.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.memory_retention_ps.value * 1000.0) as i64);
+    ser_int(&out, (s.*.model.material_refractive_index.value * 1000000.0) as i64);
+    ser_int(&out, (s.*.model.material_thermal_coefficient_ppm_c.value * 1000000.0) as i64);
+    ser_int(&out, (s.*.model.port_bandwidth_ghz.value * 1000.0) as i64);
     ser_text(&out, "\n");
     let i: i32 = 0;
     while (i < s.*.comps.len) {
@@ -1179,7 +1196,8 @@ fn design_load_into(s: *Scene, path: []u8) bool {
             parse_line_ints(line, 1, &nums, &mstop);
             if (nums.len >= 10) {
                 let schema: i32 = list.get[i64](nums, 0) as i32;
-                if (schema != 1) { return false; }
+                if (schema < model_schema_min() || schema > model_schema_current()) { return false; }
+                if (schema == 1) { model_prepare_schema1(&s.*.model); }
                 s.*.model.schema_version = schema;
                 model_apply_known_mask(&s.*.model, list.get[i64](nums, 1));
                 s.*.model.pitch_nm.value = (list.get[i64](nums, 2) as f64) / 1000.0;
@@ -1190,6 +1208,26 @@ fn design_load_into(s: *Scene, path: []u8) bool {
                 s.*.model.emitter_wavelength_min_nm.value = (list.get[i64](nums, 7) as f64) / 1000.0;
                 s.*.model.emitter_wavelength_step_nm.value = (list.get[i64](nums, 8) as f64) / 1000000.0;
                 s.*.model.chamber_resonance_nm.value = (list.get[i64](nums, 9) as f64) / 1000.0;
+                if (schema == 2) {
+                    if (nums.len < 27) { list.free[i64](&nums); return false; }
+                    s.*.model.emitter_wavelength_max_nm.value = (list.get[i64](nums, 10) as f64) / 1000.0;
+                    s.*.model.optical_bandwidth_ghz.value = (list.get[i64](nums, 11) as f64) / 1000.0;
+                    s.*.model.propagation_loss_db_cm.value = (list.get[i64](nums, 12) as f64) / 1000000.0;
+                    s.*.model.dispersion_ps_nm_km.value = (list.get[i64](nums, 13) as f64) / 1000.0;
+                    s.*.model.switching_response_ps.value = (list.get[i64](nums, 14) as f64) / 1000.0;
+                    s.*.model.detector_response_ps.value = (list.get[i64](nums, 15) as f64) / 1000.0;
+                    s.*.model.min_feature_nm.value = (list.get[i64](nums, 16) as f64) / 1000.0;
+                    s.*.model.max_feature_nm.value = (list.get[i64](nums, 17) as f64) / 1000.0;
+                    s.*.model.temperature_c.value = (list.get[i64](nums, 18) as f64) / 1000.0;
+                    s.*.model.geometry_tolerance_nm.value = (list.get[i64](nums, 19) as f64) / 1000.0;
+                    s.*.model.bend_radius_nm.value = (list.get[i64](nums, 20) as f64) / 1000.0;
+                    s.*.model.port_coupling_loss_db.value = (list.get[i64](nums, 21) as f64) / 1000000.0;
+                    s.*.model.substrate_thickness_nm.value = (list.get[i64](nums, 22) as f64) / 1000.0;
+                    s.*.model.memory_retention_ps.value = (list.get[i64](nums, 23) as f64) / 1000.0;
+                    s.*.model.material_refractive_index.value = (list.get[i64](nums, 24) as f64) / 1000000.0;
+                    s.*.model.material_thermal_coefficient_ppm_c.value = (list.get[i64](nums, 25) as f64) / 1000000.0;
+                    s.*.model.port_bandwidth_ghz.value = (list.get[i64](nums, 26) as f64) / 1000.0;
+                }
                 // reject physically impossible units/dimensions at load time
                 if (!model_units_dims_valid(s.*.model)) { list.free[i64](&nums); return false; }
             }

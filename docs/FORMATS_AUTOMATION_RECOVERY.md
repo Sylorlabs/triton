@@ -9,9 +9,10 @@ The canonical project is UTF-8 line-oriented `zpa 2` data written by
 `design_save` in `src/editops.zag`:
 
 - `zpa 2` identifies the container schema.
-- `m` stores device-model schema `1`, a known-value bit mask, pitch in milli-nm,
-  group index in millionths, response rates in milli-GHz, wavelengths in
-  milli-nm, and wavelength step in millionths of a nanometre.
+- `m` stores the project-pinned device-model schema (`1` or `2`), a known-value
+  bit mask, and fixed-point physical parameters. Schema 2 adds wavelength bounds,
+  bandwidth, loss, dispersion, response time, geometry/process limits,
+  temperature, tolerance, substrate, port, memory, and material-stack inputs.
 - `c` stores stable component ID, typed kind, integer lattice origin, quarter
   rotation, visibility, emitter preset, wavelength, chamber operation, and name.
 - `g` stores stable guide ID, typed endpoint component/port IDs, and every routed
@@ -19,14 +20,17 @@ The canonical project is UTF-8 line-oriented `zpa 2` data written by
 - `h` stores the canonical content hash of all preceding bytes.
 
 The loader accepts legacy `zpa 1` and current `zpa 2`, rejects other container
-versions, rejects device-model schemas other than `1`, verifies the v2 hash, and
+versions, rejects device-model schemas outside `1..2`, verifies the v2 hash, and
 parses into a temporary scene. The active scene is replaced only after complete
 type, coordinate, occupancy, support, endpoint, port, path-continuity, layer,
 and resource-limit validation. Future unknown fields are not yet preserved.
 
 ## Device model and evidence
 
-`src/device_model.zag` defines schema `1`. Each runtime `PhysicalParam` carries:
+`src/device_model.zag` defines current schema `2` and retains schema `1` for
+explicitly pinned legacy projects. Eight versioned device-type descriptors cover
+emitters, waveguides, chambers, memory tiles, detectors, substrates, ports, and
+material stacks. Each runtime `PhysicalParam` carries:
 
 - value and units;
 - known/unknown state;
@@ -46,12 +50,23 @@ arbitrary per-project provenance strings are not yet serialized. Derived timing
 uses GHz, ps, nm, and fs conversions in `src/sim.zag`; exported manifests retain
 units, source metadata, uncertainty, and evidence class.
 
+Migration is explicit through the Physical Model & Provenance UI or
+`model migrate 2`. Existing v1 values are preserved; fields added by v2 remain
+Unknown until evidence is supplied. `model status` reports the pin, current
+schema, completeness, and every device-type descriptor.
+
 ## Agent protocol
 
 The native line protocol is `triton-agent-1`. One command produces one `OK` or
 `ERR E_CODE diagnostic` response. `capabilities` returns protocol version,
 effective grant bits, revision, request limit, mutation metadata mechanism, and
 whether project-root confinement is active.
+
+`ui list` renders the current frame and returns `ui_schema 1` followed by every
+visible element's stable ID, role, exact bounds, enabled/active/focused state,
+and label. `ui screenshot <path>` captures that state. `ui activate <id>` routes
+through the real pointer target and requires admin capability plus the normal
+idempotency/revision envelope. The MCP equivalents have explicit JSON schemas.
 
 Project mutations use:
 
