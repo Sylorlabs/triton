@@ -21,7 +21,7 @@ and live signal controls in the same native workspace.*
 
 ![PrismStudio imported Flash PCU design](evidence/captures/flash-pcu-1440.png)
 
-*A larger Flash FIR-imported PCU design in the native workbench, with the
+*A current Flash FIR-imported PCU design in the native workbench, with the
 library, outliner, and detector signal timeline visible together.*
 
 ## Design the system. Inspect the signal. Keep the evidence.

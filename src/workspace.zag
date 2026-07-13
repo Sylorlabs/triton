@@ -782,14 +782,18 @@ fn draw_lib_card(a: *App, x: i32, y: i32, w: i32, ki: i32) i32 {
     round_rect_outline(f, card.x, card.y, card.w, card.h, radius_panel(), cbord);
     draw_kind_icon(f, card.x + pad_panel(), card.y + 12, k);
     let tx: i32 = card.x + 36;
-    let tmax: i32 = card.x + card.w - tx - pad_panel() - 10;
+    // Reserve the shortcut index before measuring copy. Every card line uses
+    // the same safe text column, so descriptive copy never crosses the border
+    // or collides with the index on narrow workspaces.
+    let idx: []u8 = fmt_i((ki + 1) as i64);
+    let tmax: i32 = card.x + card.w - tx - pad_panel() - text_w(idx) - 4;
     let tcol: i64 = th_text();
     if (armed) { tcol = rgb(240, 244, 250); }
     draw_text_max(f, tx, card.y + 5, kind_short(k), tcol, tmax);
-    draw_text_max(f, tx, card.y + 18, kind_blurb(k), th_text_dim(), tmax + 10);
+    draw_text_max(f, tx, card.y + 18, kind_blurb(k), th_text_dim(), tmax);
     let ports: []u8 = _zag_str_concat(fmt_i(kind_port_count(k) as i64), " ports  ");
-    draw_text_max(f, tx, card.y + 31, _zag_str_concat(ports, kind_compat(k)), th_text_dim(), tmax + 10);
-    draw_text(f, card.x + card.w - 12, card.y + 5, fmt_i((ki + 1) as i64), th_text_dim());
+    draw_text_max(f, tx, card.y + 31, _zag_str_concat(ports, kind_compat(k)), th_text_dim(), tmax);
+    draw_text(f, card.x + card.w - text_w(idx) - pad_text(), card.y + 5, idx, th_text_dim());
     ui_tip(inp, card, kind_name(k));
     if (hov && btn_pressed(inp, 0)) {
         a.*.tool = tool_place_base() + ki;
@@ -855,7 +859,9 @@ fn draw_toolbar(a: *App) void {
             let tncol: i64 = th_text_dim();
             if (active) { tncol = rgb(245, 247, 252); }
             else if (th_) { tncol = th_text(); }
-            draw_text(f, tr.x + (tr.w - text_w(tn)) / 2, tr.y + 4, tn, tncol);
+            let tnmax: i32 = tr.w - pad_text() * 2;
+            let tnx: i32 = tr.x + (tr.w - imin(text_w(tn), tnmax)) / 2;
+            draw_text_max(f, tnx, tr.y + 4, tn, tncol, tnmax);
             if (th_ && btn_released(inp, 0)) { a.*.lib_tab = t; }
             tcol_i = tcol_i + 1;
         }
@@ -1266,8 +1272,9 @@ fn outliner_group_row(a: *App, x: i32, y: i32, w: i32, gi: i32, label: []u8, cou
     let arrow: []u8 = ">";
     if (open) { arrow = "v"; }
     draw_text(f, x + 4, y + 4, arrow, th_text_dim());
-    draw_text(f, x + 16, y + 4, label, th_text());
     let cnt: []u8 = fmt_i(count as i64);
+    let label_max: i32 = w - 16 - text_w(cnt) - 12;
+    draw_text_max(f, x + 16, y + 4, label, th_text(), label_max);
     draw_text(f, x + w - text_w(cnt) - 6, y + 4, cnt, th_text_dim());
     if (hov && btn_released(inp, 0)) {
         let nv: i32 = 1;
@@ -1483,7 +1490,7 @@ fn draw_outliner(a: *App) void {
                 if (sci >= 0 && dci >= 0) {
                     let t1: []u8 = _zag_str_concat(a.*.scene.*.comps.data[sci].name_, " > ");
                     let t2: []u8 = _zag_str_concat(t1, a.*.scene.*.comps.data[dci].name_);
-                    draw_text(f, row.x + 15, row.y + 3, t2, th_text());
+                    draw_text_max(f, row.x + 15, row.y + 3, t2, th_text(), row.w - 34);
                     _zag_str_free(t1);
                     _zag_str_free(t2);
                 }
@@ -1576,7 +1583,8 @@ fn draw_signal_row(a: *App, x: i32, y: i32, w: i32, comp_id: i32, label: []u8, t
     if (hidden) { lcol = th_text_dim(); }
     if (hl) { fill_rect(f, lrect.x - 2, y, 100, 14, th_accent()); }
     else if (sel_has(a, comp_id)) { fill_rect(f, lrect.x - 2, y, 100, 14, th_header()); }
-    draw_text_max(f, lrect.x, y + 3, label, lcol, 78);
+    let label_max: i32 = 78;
+    draw_text_max(f, lrect.x, y + 3, label, lcol, label_max);
     // propagation delay of the incoming guide, in symbols (Section 3.10)
     let din: i32 = 0 - 1;
     let gg2: i32 = 0;
@@ -1589,7 +1597,7 @@ fn draw_signal_row(a: *App, x: i32, y: i32, w: i32, comp_id: i32, label: []u8, t
     }
     if (din >= 0) {
         let ds: []u8 = _zag_str_concat("+", fmt_i(din as i64));
-        draw_text(f, lrect.x + text_w(label) + 4, y + 3, ds, th_accent_hot());
+        draw_text(f, lrect.x + imin(text_w(label), label_max) + 4, y + 3, ds, th_accent_hot());
     }
     // clicking the label selects the part and lights its beam path in 3D
     let _eid: i64 = ui_register(inp, "timelineitem", fmt_i(comp_id as i64), label,
