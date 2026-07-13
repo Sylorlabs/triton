@@ -1,36 +1,63 @@
-# Triton
+# PrismStudio
 
-Triton is an experimental, pure-Zag CAD and deterministic simulation environment
-for spatial balanced-ternary optical processor designs. It currently provides a
-native X11 workbench, CPU reference renderer, voxel design-rule engine, 3D
-waveguide router, symbolic/phase-aware simulator, project persistence, undo/redo,
-a continuous background optimizer that proposes equivalence-verified
-simplifications, and native line/MCP automation.
-Flash hardware IR (`.fir`) can be imported as a real routed photonic design and
-verified against the compiler-recorded balanced-ternary results.
+### Native CAD and deterministic simulation for exploratory photonic computing
 
-The workbench is a token-driven dark UI drawn entirely by Triton's own
-renderer: a searchable component-card library with category tabs and
-drag-into-viewport placement, an inspector with journaled numeric fields
-(steppers, precise typing, units, inline validation), a filterable outliner
-with lock/visibility toggles and warning badges, a zoomable/scrubbable signal
-timeline with pin/hide and 3D cross-highlight, a measure tool, grid/object/
-port snapping with pre-commit snap targets, right-click context menus, object
-grouping, inline rename, a section view, tooltips, reduced-motion mode, and a
-clickable design-warnings list. Side panels render into retained surfaces and
-redraw only when their displayed state changes; interaction budgets are
-enforced by the `ui-perf` verification gate rather than asserted here.
+![PrismStudio native workbench](evidence/captures/ui-design-1280.png)
 
-Triton is software for design-model verification. It does not claim that the
-illustrative reference device has been fabricated, measured, or laboratory
-validated. Physical values shown by the bundled example model are labeled
-`Illustrative`; an incomplete model is reported as unknown and cannot produce a
-verified simulation.
+PrismStudio is a native, pure-Zag workbench for designing, inspecting, and
+deterministically simulating spatial balanced-ternary photonic processors. It
+brings 3D layout, routing, signal inspection, physical-model provenance, and
+authorized automation together in one local desktop application.
 
-## Supported build and verification
+## Design the system. Inspect the signal. Keep the evidence.
+
+- **A purpose-built native workbench.** Compose components and waveguides in a
+  dark X11 desktop UI with a searchable library, drag-to-place layout,
+  inspector, outliner, signal timeline, section view, measurement, snapping,
+  grouping, and design warnings.
+- **A deterministic design loop.** PrismStudio couples a voxel design-rule
+  engine, deterministic 3D waveguide router, and symbolic/phase-aware
+  balanced-ternary simulator so a design can be laid out, analyzed, and
+  revisited reproducibly.
+- **Evidence-first physical modeling.** Schema v2 records 25
+  provenance-bearing parameters across emitters, waveguides, chambers, memory
+  tiles, detectors, substrates, ports, and material stacks. Unknown stays
+  unknown; the simulator does not invent a missing physical value.
+- **Automation you can audit.** Native line and MCP interfaces provide
+  revision-checked mutations, stable UI control IDs and bounds, live screenshots,
+  physical-model inspection, and an append-only local audit trail.
+
+## What you can do today
+
+- Build a photonic design visually, inspect its hierarchy and parameters, and
+  route 3D waveguides through the scene.
+- Run deterministic software simulation, scrub detector signals in the timeline,
+  and cross-highlight the corresponding geometry in 3D.
+- Import Flash hardware IR (`.fir`) as a routed photonic design and verify its
+  detector results against compiler-recorded balanced-ternary expectations.
+- Save, version, recover, export, and undo project edits with transactional
+  project operations.
+- Review background optimizer proposals for equivalence-verified dead paths and
+  constant operations before applying them. Auto-apply is off by default.
+- Drive the same project and UI through authorized CLI or MCP automation,
+  including physical model/provenance reads and guarded UI activation.
+
+## An honest boundary
+
+PrismStudio is **software for design-model verification**, not a claim of
+fabricated or laboratory-validated photonic hardware. The bundled reference
+device model is explicitly labeled `Illustrative`; values provided by users,
+literature, or measurements retain their own evidence labels.
+
+The production viewport is the CPU renderer and its permanent reference/fallback.
+An AMDGPU runtime is present for research, but is experimental, opt-in, and not
+certified on the current single-GPU display system. PrismStudio makes no GPU
+performance or dispatch-reliability claim.
+
+## Build, run, and verify
 
 The supported compiler is the sibling Zag checkout's self-hosted native compiler.
-No C compiler, libc, Xlib, Mesa, LLVM, or Python service is used by Triton.
+No C compiler, libc, Xlib, Mesa, LLVM, or Python service is used by PrismStudio.
 
 ```bash
 ./build.sh             # production binary plus safe CPU/X11 checks
@@ -41,6 +68,14 @@ No C compiler, libc, Xlib, Mesa, LLVM, or Python service is used by Triton.
 ./zagctl mcp           # native MCP server
 ./zagctl flash import ../flash/examples/photonic_massive.fir
 ```
+
+`./verify.sh safe` is the everyday source of truth. It exercises the safe build,
+engine, persistence, routing, simulation, optimizer, automation, physical-model,
+and claim-audit suites; native X11 tests and captures run when `DISPLAY` is
+available. GPU memory, submission, and compute checks are separate explicit
+research modes, not a hidden prerequisite for the safe result.
+
+## Automation with deliberate authority
 
 Native agents default to `read,inspect,simulate`. Mutation, save, export, local
 execution, and admin operations require an explicit `TRITON_CAPS` grant. The
@@ -53,70 +88,29 @@ Project mutations use `request <idempotency-key> <expected-revision> <command>`.
 `TRITON_IDEMPOTENCY` to a stable caller key when retrying. MCP clients use the
 advertised `triton_mutate` tool or a specialized mutation tool whose schema
 requires `idempotency_key` and `expected_revision`. Successful results include
-revision, idempotency key, affected ID, and undo token. Unkeyed mutations are
-rejected. MCP component arguments use `component_id` to avoid colliding with the
-JSON-RPC request `id`.
+the revision, idempotency key, affected ID, and undo token. Unkeyed mutations
+are rejected.
 
-Authorized automation can inspect the live interface with `ui list`, capture the
-same state with `ui screenshot <path.bmp>`, and activate an advertised control
-with the revision-checked `ui activate <element-id>` mutation. The catalog is
-generated by the widgets themselves and reports stable IDs, semantic roles,
-enabled/active/focused state, and exact live click bounds. MCP exposes the same
-contract as `triton_ui_list`, `triton_ui_screenshot`, and `triton_ui_activate`.
+Authorized automation can inspect the live interface with `ui list`, capture it
+with `ui screenshot <path.bmp>`, and activate an advertised control with the
+revision-checked `ui activate <element-id>` mutation. The widget-generated
+catalog reports stable IDs, semantic roles, enabled/active/focused state, and
+exact live click bounds. MCP exposes the same contract as `triton_ui_list`,
+`triton_ui_screenshot`, and `triton_ui_activate`.
 
-Set `ZNC=/absolute/path/to/znc` to override the default
-`../zag/zag-poc/znc`. The current environment and exact compiler hash used for
-release evidence are recorded in `evidence/progress-ledger.md`.
+## Physical model and provenance
 
-## Evidence levels
+Help → Physical Model & Provenance opens the project-pinned model browser.
+Evidence levels are `Illustrative`, `User-entered`, `Simulated`,
+`Literature-derived`, `Measured`, and `Unknown`. Board timing is derived from
+the selected model's component response parameters, routed geometry, and
+material group index; no frequency is a universal PrismStudio constant.
 
-- `Illustrative`: bundled reference-model input used to test software behavior.
-- `User-entered`: a project value supplied without independent validation.
-- `Simulated`: derived by the deterministic software model.
-- `Literature-derived`: tied to a cited source and version.
-- `Measured`: imported measurement with date, method, uncertainty, and source.
-- `Unknown`: unavailable; Triton does not invent a replacement.
+Legacy schema-v1 projects stay pinned until the user or an authorized agent
+explicitly migrates them. Migration retains existing values and marks newly
+introduced fields `Unknown` rather than manufacturing evidence.
 
-Board timing is derived from the selected model's component response parameters,
-routed geometry, and material group index. No frequency is a universal Triton
-constant.
-
-Help → Physical Model & Provenance opens the project-pinned model browser. Schema
-v2 covers emitters, waveguides, chambers, memory tiles, detectors, substrates,
-ports, and material stacks across 25 provenance-bearing physical parameters.
-Legacy schema-v1 projects remain pinned until the user or an authorized agent
-explicitly migrates them; migration preserves existing values and marks new
-fields Unknown rather than inventing evidence.
-
-## Rendering and GPU status
-
-The production viewport uses the CPU renderer as its permanent reference and
-fallback. A direct AMDGPU research runtime exists, but it is experimental and
-never runs in the default build or viewport. GPU memory access and command
-submission are separate explicit verification modes. They are not certified on
-the current single-GPU display system, and no GPU performance claim is made.
-
-## Continuous optimizer (Photon Solver)
-
-Triton runs a lightweight background optimizer that continuously searches for
-mathematically-equivalent, cheaper ways to compute the same optical result — it
-changes how a design computes, never what it computes. Every proposal is verified
-output-equivalent against the reference simulation (identical detector trits at
-every symbol over a bounded horizon) before it is ever shown, and re-verified
-again at apply time.
-
-Two rewrite families are implemented today: dead-path elimination (removing
-components that cannot affect any detector) and constant-op collapse (folding a
-constant-driven multiply or nand chamber to a negate). The optimizer surfaces a
-single Optimizer button whose count updates silently; its panel offers Apply,
-Ignore, and Details with the measured cost delta. Auto-apply is a Settings toggle
-that is off by default. Applying an optimization — manually or automatically — is
-a single undo and is written to the audit log with the rewrite family and measured
-gain. The optimizer runs off the interaction path and never mutates a project
-while auto-apply is off. Behavior is covered by the `optimizer` and `optimizer-ui`
-safe-gate suites.
-
-## Project structure
+## Project map
 
 ```text
 src/main.zag          native X11, headless, agent, and MCP entry point
@@ -124,7 +118,7 @@ src/device_model.zag  versioned physical inputs and provenance classes
 src/scene.zag         components, ports, occupancy, and optical graph
 src/routing.zag       deterministic 3D waveguide router
 src/sim.zag           balanced-ternary symbolic/physical simulation
-src/optimizer.zag     continuous equivalence-verified optimizer (Section 20)
+src/optimizer.zag     continuous equivalence-verified optimizer
 src/editops.zag       transactional edits, undo/redo, and project format
 src/viewport.zag      CPU 3D reference renderer and picking
 src/x11.zag           direct X11 wire-protocol client
@@ -133,9 +127,10 @@ tools/verify.zag      pure-Zag verification orchestrator
 evidence/             master-plan ledger and release evidence index
 ```
 
-The complete implementation and acceptance contract is in `masterplan.md`.
-Unchecked items are incomplete regardless of whether a narrower test passes.
-Project format, model evidence, agent/MCP contracts, and recovery behavior are
-documented in `docs/FORMATS_AUTOMATION_RECOVERY.md`. Reference PCU reproduction
-steps are documented in `docs/REPRODUCE_REFERENCE_PCU.md`. Verified release notes
-are in `docs/RELEASE_NOTES.md`.
+The complete implementation and acceptance contract is in
+[masterplan.md](masterplan.md); unchecked items remain incomplete even when a
+narrower test passes. See [release notes](docs/RELEASE_NOTES.md) for the current
+verified scope, [automation and recovery details](docs/FORMATS_AUTOMATION_RECOVERY.md)
+for the project and agent contracts, [reference PCU reproduction](docs/REPRODUCE_REFERENCE_PCU.md)
+for the maintained workload, and the [evidence index](evidence/README.md) for
+the verification record.

@@ -46,8 +46,8 @@ based on commit count and they do not imply unrun hardware certification.
   5700 XT because it is also the display GPU.
 - No fabricated photonic hardware, silicon, lab measurement, or production
   manufacturing result is claimed.
-- Visible UI controls for Flash source/FIR import, step/run, and trace inspection
-  remain planned work.
+- Flash source/FIR import and trace inspection are software-simulation tooling;
+  their UI does not validate fabricated hardware.
 - Move, rotate, disconnect, reroute, close-project, cancellation, and full
   per-tool invalid/unauthorized/conflict matrices are not yet complete.
 
