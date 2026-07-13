@@ -2,12 +2,27 @@
 
 ### Native CAD and deterministic simulation for exploratory photonic computing
 
-![PrismStudio native workbench](evidence/captures/ui-design-1280.png)
-
 PrismStudio is a native, pure-Zag workbench for designing, inspecting, and
 deterministically simulating spatial balanced-ternary photonic processors. It
 brings 3D layout, routing, signal inspection, physical-model provenance, and
 authorized automation together in one local desktop application.
+
+## See the current workbench
+
+![PrismStudio design workspace: component library, 3D viewport, outliner, and signal timeline](evidence/captures/ui-design-1280.png)
+
+*The current design workspace: searchable component library, 3D viewport,
+hierarchical outliner, inspector, and signal timeline.*
+
+![PrismStudio routed reference design](evidence/captures/reference-1024.png)
+
+*A compact routed reference design, showing the layout, component hierarchy,
+and live signal controls in the same native workspace.*
+
+![PrismStudio imported Flash PCU design](evidence/captures/flash-pcu-1440.png)
+
+*A larger Flash FIR-imported PCU design in the native workbench, with the
+library, outliner, and detector signal timeline visible together.*
 
 ## Design the system. Inspect the signal. Keep the evidence.
 
