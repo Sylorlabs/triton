@@ -38,6 +38,25 @@ fn main() i32 {
     check("visible save then open preserves the reference PCU", a.*.scene.*.comps.len == saved_n,
         &failures);
 
+    // Flash FIR workspace: visible command, bounded import, source/operation
+    // inspector state, and the same Run/Step simulation controls.
+    app_action(a, 49);
+    check("visible Flash FIR Workspace command opens the panel", a.*.flash_open, &failures);
+    let imported: bool = app_flash_import(a, "examples/flash_reference.fir");
+    check("Flash FIR import builds every operation into the design",
+        imported && a.*.flash_ops.len == 4 && a.*.scene.*.comps.len == 24, &failures);
+    check("Flash source and per-operation trace are retained for inspection",
+        a.*.flash_raw.len > 0 && a.*.flash_tags.len == 4 && a.*.flash_verify_errors == 0,
+        &failures);
+    let fsym: i64 = a.*.sim.*.symbol;
+    sim_step(a.*.sim, a.*.scene);
+    check("Flash Step control advances the imported program", a.*.sim.*.symbol == fsym + 1, &failures);
+    app_frame(a, 0.016); // renders the full source/operation panel path
+
+    let bad: bool = app_flash_import(a, "corpus/flash/bad_operation.fir");
+    check("invalid Flash FIR produces an explicit error state without pretending success",
+        !bad && a.*.flash_verify_errors < 0 && a.*.invalid_text.len > 0, &failures);
+
     if (failures == 0) { _zag_println("REFERENCE PCU UI: ALL PASS"); return 0; }
     _zag_println("REFERENCE PCU UI: FAILURES"); return 1;
 }

@@ -5,11 +5,25 @@
 fn main() i32 {
     let a: *App = app_new(1600, 1000);
     a.*.left_w = 218; a.*.right_w = 301; a.*.bottom_h = 231;
+    a.*.opt.*.enabled = false;
+    a.*.opt.*.auto_apply = true;
+    a.*.opt.*.min_gain_pct = 17;
+    a.*.opt.*.family_dead_path = false;
+    a.*.opt.*.family_const_collapse = true;
+    a.*.opt.*.cpu_budget_pct = 9;
+    a.*.opt.*.quiet_start_hour = 21;
+    a.*.opt.*.quiet_end_hour = 6;
     if (!app_layout_save(a)) { _zag_println("UI PREFS: save failed"); return 1; }
     let b: *App = app_new(1600, 1000);
     app_layout_load(b);
     if (b.*.left_w != 218 || b.*.right_w != 301 || b.*.bottom_h != 231) {
         _zag_println("UI PREFS: roundtrip mismatch"); return 1;
+    }
+    if (b.*.opt.*.enabled || !b.*.opt.*.auto_apply || b.*.opt.*.min_gain_pct != 17 ||
+        b.*.opt.*.family_dead_path || !b.*.opt.*.family_const_collapse ||
+        b.*.opt.*.cpu_budget_pct != 9 || b.*.opt.*.quiet_start_hour != 21 ||
+        b.*.opt.*.quiet_end_hour != 6) {
+        _zag_println("UI PREFS: optimizer settings mismatch"); return 1;
     }
     _zag_println("UI PREFS: ALL PASS");
     return 0;

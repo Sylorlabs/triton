@@ -1,0 +1,44 @@
+// recovery_ui_test.zag — bounded autosave retention + explicit recovery UX.
+
+@import("../src/workspace.zag")
+@import("../src/session.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1024, 640);
+    a.*.file_ = session_zpa_path();
+    let i: i32 = 0;
+    while (i < 5) {
+        let _id: i32 = scene_place(a.*.scene, Kind.Plate, vox(i * 4, 0, 0), 0);
+        a.*.dirty = true;
+        session_push(a);
+        i = i + 1;
+    }
+    check("autosave retains snapshot 1", _zag_file_exists(session_recovery_path(1)) == 1, &failures);
+    check("autosave retains snapshot 2", _zag_file_exists(session_recovery_path(2)) == 1, &failures);
+    check("autosave retains snapshot 3", _zag_file_exists(session_recovery_path(3)) == 1, &failures);
+    check("autosave retention is bounded to three snapshots", _zag_file_exists(session_recovery_path(4)) == 0, &failures);
+
+    app_action(a, 34);
+    check("File > Recover exposes the retained snapshots", a.*.modal == modal_recovery() && a.*.modal_files.len == 3, &failures);
+    let current_n: i32 = a.*.scene.*.comps.len;
+    let restored: bool = app_recover_file(a, a.*.modal_files.data[0]);
+    check("recovery choice restores the prior valid design",
+        restored && a.*.scene.*.comps.len == current_n - 1 && a.*.dirty &&
+        _zag_strcmp(a.*.file_, "recovered.zpa") == 1, &failures);
+
+    // A corrupt live file must fail closed into the chooser instead of being
+    // overwritten by a demo or presented as a valid project.
+    _zag_write_file(session_zpa_path(), "corrupt\n");
+    let b: *App = app_new(800, 600);
+    session_bind(b);
+    check("corrupt live autosave opens explicit recovery UX", b.*.modal == modal_recovery(), &failures);
+
+    if (failures == 0) { _zag_println("RECOVERY UI: ALL PASS"); return 0; }
+    _zag_println("RECOVERY UI: FAILURES"); return 1;
+}

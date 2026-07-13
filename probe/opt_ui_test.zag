@@ -60,10 +60,16 @@ fn main() i32 {
     click(a, rect_cx(ob), rect_cy(ob));
     check("clicking the Optimizer button opens its panel", a.*.opt_open, &failures);
 
-    // Click Apply inside the panel: the emitter is removed, panel closes, badge clears.
+    // Apply is locked until the user has reviewed the exact diff/equivalence proof.
     let comps_before: i32 = a.*.scene.*.comps.len;
     let px: i32 = ob.x + ob.w - 300;
     if (px < 4) { px = 4; }
+    click(a, px + 10 + 41, menu_h() + 62 + 10);   // Apply before preview
+    check("Apply is locked until Details preview is viewed",
+        a.*.scene.*.comps.len == comps_before && a.*.opt.*.has_pending, &failures);
+    click(a, px + 186 + 41, menu_h() + 62 + 10);  // Details
+    check("Details opens the before/after equivalence preview",
+        a.*.opt_details && a.*.opt_previewed, &failures);
     click(a, px + 10 + 41, menu_h() + 62 + 10);   // center of the Apply button
     check("Apply removes the dead part and closes the panel",
         !a.*.opt_open && !a.*.opt.*.has_pending &&
@@ -96,14 +102,45 @@ fn main() i32 {
     let spx: i32 = gr.x + gr.w - 236;
     if (spx < 4) { spx = 4; }
     let toggle_x: i32 = spx + 236 - 62 + 26;         // center of the Auto-apply toggle
-    let toggle_y: i32 = menu_h() + 26 + 24 + 9;
+    let toggle_y: i32 = menu_h() + 26 + 24 * 6 + 9;
     click(a, toggle_x, toggle_y);
     check("Auto-apply setting toggles", a.*.opt.*.auto_apply != before_auto && a.*.opt.*.auto_apply, &failures);
     check("Auto-apply defaults off", !before_auto, &failures);
+    check("default CPU budget produces a bounded background cadence",
+        a.*.opt.*.cpu_budget_pct == 5 && opt_cadence_frames(a.*.opt) == 60, &failures);
+    let hour: i32 = ((opt_epoch_seconds() / 3600) % 24) as i32;
+    a.*.opt.*.quiet_start_hour = hour; a.*.opt.*.quiet_end_hour = (hour + 1) % 24;
+    check("configured quiet hours suppress optimizer work", opt_quiet_now(a.*.opt), &failures);
+    a.*.opt.*.quiet_start_hour = 22; a.*.opt.*.quiet_end_hour = 7;
 
     // Clicking the viewport (well outside the panel) dismisses Settings.
     click(a, 512, 360);
     check("clicking outside closes the Settings panel", !a.*.settings_open, &failures);
+
+    // Optimizer and Settings are keyboard reachable; their active menu state is
+    // the visible focus indicator.
+    a.*.inp.keys.len = 0; list.push[i32](&a.*.inp.keys, 'o' as i32); a.*.inp.mods = 4;
+    app_frame(a, 0.016); a.*.inp.keys.len = 0; a.*.inp.mods = 0;
+    check("Alt+O opens the Optimizer with visible active state", a.*.opt_open, &failures);
+    a.*.opt_open = false;
+    a.*.inp.keys.len = 0; list.push[i32](&a.*.inp.keys, 's' as i32); a.*.inp.mods = 4;
+    app_frame(a, 0.016); a.*.inp.keys.len = 0; a.*.inp.mods = 0;
+    check("Alt+S opens Settings with visible active state", a.*.settings_open, &failures);
+
+    // Ignore records the signature and the change-keyed scheduler never offers
+    // the same rewrite again.
+    let b: *App = app_new(800, 600);
+    let _bp: i32 = scene_place(b.*.scene, Kind.Plate, vox(0, 0, 0), 0);
+    let _be: i32 = scene_place(b.*.scene, Kind.Emitter, vox(1, 1, 2), 0);
+    let _bt: bool = opt_engine_tick(b.*.opt, b.*.scene);
+    b.*.opt_open = true;
+    let bob: Rect = zone_opt_btn(b);
+    let bpx: i32 = imax(4, bob.x + bob.w - 300);
+    click(b, bpx + 98 + 41, menu_h() + 62 + 10);
+    check("Ignore dismisses and records the proposal", !b.*.opt.*.has_pending && b.*.opt.*.rejected.len == 1, &failures);
+    scene_mark_render(b.*.scene);
+    let _br: bool = opt_engine_refresh_keyed(b.*.opt, b.*.scene);
+    check("ignored rewrite is never re-proposed", !b.*.opt.*.has_pending, &failures);
 
     if (failures == 0) { _zag_println("OPT UI: ALL PASS"); return 0; }
     _zag_println("OPT UI: FAILURES"); return 1;

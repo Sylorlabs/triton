@@ -18,6 +18,7 @@
 @import("editops.zag")
 @import("optimizer.zag")
 @import("uilayer.zag")
+@import("flash_ir.zag")
 
 // tools
 fn tool_select() i32 { return 0; }
@@ -38,6 +39,13 @@ fn modal_none() i32 { return 0; }
 fn modal_open() i32 { return 1; }
 fn modal_saveas() i32 { return 2; }
 fn modal_keys() i32 { return 3; }
+fn modal_recovery() i32 { return 4; }
+fn modal_permission() i32 { return 5; }
+
+fn access_ready() i32 { return 0; }
+fn access_loading() i32 { return 1; }
+fn access_disconnected() i32 { return 2; }
+fn access_read_only() i32 { return 3; }
 
 struct App {
     f: FB,
@@ -82,6 +90,9 @@ struct App {
     modal_text: list.ArrayList[u8],
     modal_files: list.ArrayList[[]u8],
     modal_scroll: i32,
+    access_state: i32,
+    access_message: []u8,
+    permission_decision: i32, // -1 kept read-only, 0 pending/none, 1 allowed once
     // outliner
     expand: list.ArrayList[i32],
     out_scroll: i32,
@@ -107,10 +118,18 @@ struct App {
     opt: *OptEngine,        // background optical-computation optimizer (Section 20)
     opt_open: bool,         // Optimizer proposal panel open
     opt_details: bool,      // proposal details expanded
+    opt_previewed: bool,    // manual Apply is locked until the diff was viewed
     settings_open: bool,    // Settings panel open
     palette_open: bool,     // command palette open
     palette_text: list.ArrayList[u8],
     palette_sel: i32,       // highlighted row in the filtered command list
+    flash_open: bool,       // Flash FIR import/source/operation inspector
+    flash_path: TextEdit,
+    flash_raw: []u8,
+    flash_tags: list.ArrayList[[]u8],
+    flash_ops: list.ArrayList[i32],
+    flash_expected: list.ArrayList[i32],
+    flash_verify_errors: i32,
     box_sel: bool,          // dragging a rubber-band selection box
     box_x0: i32,
     box_y0: i32,
@@ -242,6 +261,9 @@ fn app_new(w: i32, h: i32) *App {
         .modal_text = list.make[u8](32),
         .modal_files = list.make[[]u8](8),
         .modal_scroll = 0,
+        .access_state = access_ready(),
+        .access_message = "",
+        .permission_decision = 0,
         .expand = list.make[i32](8),
         .out_scroll = 0,
         .speed_drag = 0,
@@ -263,10 +285,18 @@ fn app_new(w: i32, h: i32) *App {
         .opt = opt_engine_new(),
         .opt_open = false,
         .opt_details = false,
+        .opt_previewed = false,
         .settings_open = false,
         .palette_open = false,
         .palette_text = list.make[u8](32),
         .palette_sel = 0,
+        .flash_open = false,
+        .flash_path = textedit_new(),
+        .flash_raw = "",
+        .flash_tags = list.make[[]u8](16),
+        .flash_ops = list.make[i32](16),
+        .flash_expected = list.make[i32](16),
+        .flash_verify_errors = 0 - 1,
         .box_sel = false,
         .box_x0 = 0,
         .box_y0 = 0,
@@ -349,6 +379,7 @@ fn app_new(w: i32, h: i32) *App {
         list.push[i32](&a.*.expand, 1);
         i = i + 1;
     }
+    textedit_set(&a.*.flash_path, "examples/flash_reference.fir");
     app_log(a, "ready");
     return a;
 }
@@ -362,9 +393,9 @@ fn app_layout_path() []u8 {
 fn app_layout_load(a: *App) void {
     let raw: []u8 = _zag_read_file(app_layout_path());
     if (raw.len <= 0) { return; }
-    let vals: list.ArrayList[i64] = list.make[i64](6);
+    let vals: list.ArrayList[i64] = list.make[i64](14);
     let pos: i32 = 0;
-    while (pos < raw.len && vals.len < 6) {
+    while (pos < raw.len && vals.len < 14) {
         while (pos < raw.len && ((raw[pos] as i32) == 32 || (raw[pos] as i32) == 10)) { pos = pos + 1; }
         let st: i32 = pos;
         while (pos < raw.len && (raw[pos] as i32) != 32 && (raw[pos] as i32) != 10) { pos = pos + 1; }
@@ -382,6 +413,20 @@ fn app_layout_load(a: *App) void {
         a.*.snap_obj = vals.data[4] != 0;
     }
     if (vals.len >= 6) { a.*.tl_zoom = clampi(vals.data[5] as i32, 2, 14); }
+    if (vals.len >= 9) {
+        a.*.opt.*.enabled = vals.data[6] != 0;
+        a.*.opt.*.auto_apply = vals.data[7] != 0;
+        a.*.opt.*.min_gain_pct = clampi(vals.data[8] as i32, 1, 100);
+    }
+    if (vals.len >= 11) {
+        a.*.opt.*.family_dead_path = vals.data[9] != 0;
+        a.*.opt.*.family_const_collapse = vals.data[10] != 0;
+    }
+    if (vals.len >= 14) {
+        a.*.opt.*.cpu_budget_pct = clampi(vals.data[11] as i32, 1, 20);
+        a.*.opt.*.quiet_start_hour = clampi(vals.data[12] as i32, 0, 23);
+        a.*.opt.*.quiet_end_hour = clampi(vals.data[13] as i32, 0, 23);
+    }
     list.free[i64](&vals);
 }
 
@@ -397,7 +442,19 @@ fn app_layout_save(a: *App) bool {
     let p5: []u8 = _zag_str_concat(_zag_str_concat(p4, " "), _zag_i64_to_str(rm));
     let p6: []u8 = _zag_str_concat(_zag_str_concat(p5, " "), _zag_i64_to_str(sn));
     let p7: []u8 = _zag_str_concat(_zag_str_concat(p6, " "), _zag_i64_to_str(a.*.tl_zoom as i64));
-    return atomic_write_file(app_layout_path(), _zag_str_concat(p7, "\n"));
+    let oe: i64 = 0; if (a.*.opt.*.enabled) { oe = 1; }
+    let oa: i64 = 0; if (a.*.opt.*.auto_apply) { oa = 1; }
+    let fd: i64 = 0; if (a.*.opt.*.family_dead_path) { fd = 1; }
+    let fc: i64 = 0; if (a.*.opt.*.family_const_collapse) { fc = 1; }
+    let p8: []u8 = _zag_str_concat(_zag_str_concat(p7, " "), _zag_i64_to_str(oe));
+    let p9: []u8 = _zag_str_concat(_zag_str_concat(p8, " "), _zag_i64_to_str(oa));
+    let p10: []u8 = _zag_str_concat(_zag_str_concat(p9, " "), _zag_i64_to_str(a.*.opt.*.min_gain_pct as i64));
+    let p11: []u8 = _zag_str_concat(_zag_str_concat(p10, " "), _zag_i64_to_str(fd));
+    let p12: []u8 = _zag_str_concat(_zag_str_concat(p11, " "), _zag_i64_to_str(fc));
+    let p13: []u8 = _zag_str_concat(_zag_str_concat(p12, " "), _zag_i64_to_str(a.*.opt.*.cpu_budget_pct as i64));
+    let p14: []u8 = _zag_str_concat(_zag_str_concat(p13, " "), _zag_i64_to_str(a.*.opt.*.quiet_start_hour as i64));
+    let p15: []u8 = _zag_str_concat(_zag_str_concat(p14, " "), _zag_i64_to_str(a.*.opt.*.quiet_end_hour as i64));
+    return atomic_write_file(app_layout_path(), _zag_str_concat(p15, "\n"));
 }
 
 fn app_log(a: *App, msg: []u8) void {
@@ -1029,6 +1086,39 @@ fn app_open_file(a: *App, path: []u8) void {
     }
 }
 
+fn app_flash_import(a: *App, path: []u8) bool {
+    let ir: FlashIr = flash_ir_load(path);
+    if (!ir.valid) {
+        a.*.flash_verify_errors = 0 - 1;
+        app_invalid(a, "invalid or unsupported Flash FIR");
+        app_log(a, _zag_str_concat("cannot import Flash FIR ", path));
+        list.free[FlashOp](&ir.ops);
+        return false;
+    }
+    scene_clear(a.*.scene);
+    if (!flash_build_scene(a.*.scene, &ir)) {
+        app_invalid(a, "Flash FIR could not be placed or routed");
+        list.free[FlashOp](&ir.ops);
+        return false;
+    }
+    a.*.flash_tags.len = 0; a.*.flash_ops.len = 0; a.*.flash_expected.len = 0;
+    let i: i32 = 0;
+    while (i < ir.ops.len) {
+        list.push[[]u8](&a.*.flash_tags, _zag_strdup(ir.ops.data[i].tag));
+        list.push[i32](&a.*.flash_ops, ir.ops.data[i].lattice_op);
+        list.push[i32](&a.*.flash_expected, ir.ops.data[i].expected);
+        i = i + 1;
+    }
+    a.*.flash_raw = _zag_strdup(ir.raw);
+    a.*.flash_verify_errors = flash_verify_scene(a.*.scene, a.*.sim);
+    journal_clear(&a.*.jrn); sel_clear(a); app_frame_all(a);
+    a.*.file_ = "untitled-flash.zpa";
+    a.*.dirty = true; a.*.title_dirty = true; a.*.session_sync_now = true;
+    app_log(a, _zag_str_concat("imported Flash FIR ", path));
+    list.free[FlashOp](&ir.ops);
+    return true;
+}
+
 fn app_show_open(a: *App) void {
     a.*.modal = modal_open();
     a.*.modal_scroll = 0;
@@ -1044,6 +1134,67 @@ fn app_show_saveas(a: *App) void {
         list.push[u8](&a.*.modal_text, cur[i]);
         i = i + 1;
     }
+}
+
+fn app_recovery_base() []u8 {
+    let p: []u8 = _zag_getenv("TRITON_SESSION");
+    if (p.len > 0) { return p; }
+    return ".triton/live.zpa";
+}
+
+fn app_recovery_path(slot: i32) []u8 {
+    return _zag_str_concat(_zag_str_concat(app_recovery_base(), ".recovery."),
+                           _zag_str_concat(_zag_i64_to_str(slot as i64), ".zpa"));
+}
+
+fn app_show_recovery(a: *App) void {
+    a.*.modal_files.len = 0;
+    let i: i32 = 1;
+    while (i <= 3) {
+        let p: []u8 = app_recovery_path(i);
+        if (_zag_file_exists(p) == 1) { list.push[[]u8](&a.*.modal_files, p); }
+        i = i + 1;
+    }
+    a.*.modal = modal_recovery();
+    a.*.modal_scroll = 0;
+}
+
+fn app_recover_file(a: *App, path: []u8) bool {
+    if (!design_load(a.*.scene, path)) {
+        app_invalid(a, "recovery snapshot is corrupt");
+        return false;
+    }
+    journal_clear(&a.*.jrn); sel_clear(a); sim_reset(a.*.sim, a.*.scene); app_frame_all(a);
+    a.*.file_ = "recovered.zpa";
+    a.*.dirty = true; a.*.title_dirty = true; a.*.session_sync_now = false;
+    a.*.modal = modal_none();
+    app_log(a, _zag_str_concat("recovered snapshot ", path));
+    return true;
+}
+
+fn app_set_access_state(a: *App, state: i32, message: []u8) void {
+    a.*.access_state = state;
+    a.*.access_message = message;
+    a.*.present_full = true;
+}
+
+fn app_request_write_access(a: *App) void {
+    a.*.permission_decision = 0;
+    a.*.modal = modal_permission();
+}
+
+fn app_permission_allow_once(a: *App) void {
+    a.*.permission_decision = 1;
+    app_set_access_state(a, access_ready(), "write access allowed for this session");
+    a.*.modal = modal_none();
+    app_log(a, "write permission allowed once");
+}
+
+fn app_permission_keep_read_only(a: *App) void {
+    a.*.permission_decision = 0 - 1;
+    app_set_access_state(a, access_read_only(), "inspect-only; edits remain blocked by host policy");
+    a.*.modal = modal_none();
+    app_log(a, "write permission denied; remaining read-only");
 }
 
 // ── viewport interaction ──────────────────────────────────────────────────────
@@ -1397,6 +1548,8 @@ fn ctrl_down(inp: *Input) bool {
     return (inp.*.mods & 2) != 0;
 }
 
+fn alt_down(inp: *Input) bool { return (inp.*.mods & 4) != 0; }
+
 fn app_keys(a: *App) void {
     let inp: *Input = &a.*.inp;
 
@@ -1413,6 +1566,20 @@ fn app_keys(a: *App) void {
         else if (a.*.measure_n > 0) { a.*.measure_n = 0; }
         else if (a.*.tool != tool_select()) { app_cancel(a); }
         else { sel_clear(a); }
+    }
+
+
+    // Top-level utility controls have direct keyboard access. Their active
+    // state is the persistent visible focus/selection ring in the menu bar.
+    if (alt_down(inp)) {
+        if (key_hit(inp, 'o' as i32)) {
+            a.*.opt_open = !a.*.opt_open; a.*.settings_open = false;
+            a.*.opt_previewed = false; a.*.opt_details = false;
+        }
+        if (key_hit(inp, 's' as i32)) {
+            a.*.settings_open = !a.*.settings_open; a.*.opt_open = false;
+        }
+        return;
     }
 
     if (ctrl_down(inp)) {
@@ -1478,7 +1645,7 @@ fn app_keys(a: *App) void {
     if (key_hit(inp, key_home())) { app_frame_all(a); }
     if (key_hit(inp, 'g' as i32)) { app_start_move(a); }
     if (key_hit(inp, 'd' as i32) && shift_down(inp)) { app_duplicate(a); }
-    if (key_hit(inp, key_space())) { a.*.sim.*.playing = !a.*.sim.*.playing; }
+    if (key_hit(inp, key_space()) && inp.*.focus_index < 0) { a.*.sim.*.playing = !a.*.sim.*.playing; }
     // section (clip) view level (Section 3.5)
     if (a.*.sect_on && key_hit(inp, '[' as i32)) {
         if (a.*.sect_y > 0) { a.*.sect_y = a.*.sect_y - 1; }
@@ -1513,6 +1680,11 @@ fn app_keys(a: *App) void {
 // text entry for the Save As modal
 fn app_modal_keys(a: *App) void {
     let inp: *Input = &a.*.inp;
+    if (a.*.modal == modal_permission()) {
+        if (key_hit(inp, key_enter())) { app_permission_allow_once(a); }
+        else if (key_hit(inp, key_esc())) { app_permission_keep_read_only(a); }
+        return;
+    }
     if (key_hit(inp, key_esc())) {
         a.*.modal = modal_none();
         return;

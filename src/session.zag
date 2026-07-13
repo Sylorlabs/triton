@@ -39,6 +39,24 @@ fn session_jrn_path() []u8 {
 
 fn session_idem_path() []u8 { return _zag_str_concat(session_zpa_path(), ".idem"); }
 
+fn session_recovery_path(slot: i32) []u8 {
+    return _zag_str_concat(_zag_str_concat(session_zpa_path(), ".recovery."),
+                           _zag_str_concat(_zag_i64_to_str(slot as i64), ".zpa"));
+}
+
+// Retain exactly the three prior valid autosaves. Copy through atomic_write_file
+// so a crash while rotating cannot corrupt an already-valid snapshot.
+fn session_rotate_recovery() void {
+    let i: i32 = 3;
+    while (i >= 2) {
+        let raw: []u8 = _zag_read_file(session_recovery_path(i - 1));
+        if (raw.len > 0) { let _ok: bool = atomic_write_file(session_recovery_path(i), raw); }
+        i = i - 1;
+    }
+    let current: []u8 = _zag_read_file(session_zpa_path());
+    if (current.len > 0) { let _ok2: bool = atomic_write_file(session_recovery_path(1), current); }
+}
+
 fn session_idem_lookup(key: []u8) i64 {
     let raw: []u8 = _zag_read_file(session_idem_path());
     let i: i32 = 0;
@@ -209,6 +227,7 @@ fn session_pull(a: *App) void {
 
 fn session_push(a: *App) void {
     session_ensure_dir();
+    session_rotate_recovery();
     if (design_save(a.*.scene, a.*.file_)) {
         journal_save(&a.*.jrn, session_jrn_path());
         a.*.dirty = false;
@@ -225,12 +244,17 @@ fn session_bind(a: *App) void {
     let path: []u8 = session_zpa_path();
     a.*.file_ = _zag_strdup(path);
     a.*.session_rev = session_read_rev();
-    if (_zag_file_exists(path) == 1 && design_load(a.*.scene, path)) {
-        session_sync_journal(a);
-        sel_clear(a);
-        a.*.dirty = false;
-        sim_reset(a.*.sim, a.*.scene);
-        app_frame_all(a);
+    if (_zag_file_exists(path) == 1) {
+        if (design_load(a.*.scene, path)) {
+            session_sync_journal(a);
+            sel_clear(a);
+            a.*.dirty = false;
+            sim_reset(a.*.sim, a.*.scene);
+            app_frame_all(a);
+            return;
+        }
+        app_show_recovery(a);
+        app_log(a, "live autosave is invalid; choose a retained recovery snapshot");
         return;
     }
     demo_load(a);

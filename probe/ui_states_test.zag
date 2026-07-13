@@ -1,0 +1,45 @@
+// ui_states_test.zag — operational states and permission decisions.
+
+@import("../std/list.zag") as list
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn key1(a: *App, k: i32) void {
+    a.*.inp.keys.len = 0; list.push[i32](&a.*.inp.keys, k); app_frame(a, 0.016); a.*.inp.keys.len = 0;
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1024, 640);
+    app_set_access_state(a, access_loading(), "loading project and provider state");
+    app_frame(a, 0.016);
+    check("loading state is explicit", a.*.access_state == access_loading(), &failures);
+    app_set_access_state(a, access_disconnected(), "live session unavailable; local design preserved");
+    app_frame(a, 0.016);
+    check("disconnected state preserves a retryable mode", a.*.access_state == access_disconnected(), &failures);
+    app_set_access_state(a, access_read_only(), "host policy allows inspection only");
+    app_request_write_access(a);
+    check("read-only state opens a real permission prompt", a.*.modal == modal_permission(), &failures);
+    key1(a, 27);
+    check("Esc denies permission and keeps read-only", a.*.permission_decision < 0 && a.*.access_state == access_read_only(), &failures);
+    app_request_write_access(a);
+    key1(a, 13);
+    check("Enter allows once and returns to ready", a.*.permission_decision == 1 && a.*.access_state == access_ready(), &failures);
+
+    // Pointer path uses the same production decision handler as the modal button.
+    app_set_access_state(a, access_read_only(), "host policy allows inspection only");
+    app_request_write_access(a);
+    let rx: i32 = (a.*.inp.w - 440) / 2;
+    let ry: i32 = (a.*.inp.h - 156) / 2;
+    a.*.inp.mx = rx + 70; a.*.inp.my = ry + 120;
+    a.*.inp.prev_btn = 0; a.*.inp.btn = 1; app_frame(a, 0.016);
+    a.*.inp.prev_btn = 1; a.*.inp.btn = 0; app_frame(a, 0.016);
+    check("pointer can allow the permission prompt", a.*.permission_decision == 1, &failures);
+
+    if (failures == 0) { _zag_println("UI STATES: ALL PASS"); return 0; }
+    _zag_println("UI STATES: FAILURES"); return 1;
+}

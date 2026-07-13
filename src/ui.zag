@@ -105,6 +105,10 @@ struct Input {
     tip_y: i32,
     // true while any text field owns the keyboard (suppresses app shortcuts)
     text_focus: bool,
+    focus_index: i32,      // Tab-selected immediate-mode widget (-1 none)
+    focus_cursor: i32,     // widget ordinal while drawing this frame
+    focus_count_prev: i32, // traversal bound from the previous frame
+    focus_nav: bool,       // force retained panels to enumerate on Tab frames
 }
 
 fn input_new() Input {
@@ -124,6 +128,10 @@ fn input_new() Input {
         .tip_x = 0,
         .tip_y = 0,
         .text_focus = false,
+        .focus_index = 0 - 1,
+        .focus_cursor = 0,
+        .focus_count_prev = 0,
+        .focus_nav = false,
     };
 }
 
@@ -248,6 +256,33 @@ fn key_hit(in: *Input, code: i32) bool {
     return false;
 }
 
+fn input_focus_begin(in: *Input) void {
+    in.*.focus_cursor = 0;
+    in.*.focus_nav = key_hit(in, 9); // Tab
+    if (!in.*.focus_nav) { return; }
+    if (in.*.focus_count_prev <= 0) { in.*.focus_index = 0; return; }
+    if (shift_down(in)) {
+        in.*.focus_index = in.*.focus_index - 1;
+        if (in.*.focus_index < 0) { in.*.focus_index = in.*.focus_count_prev - 1; }
+    } else {
+        in.*.focus_index = in.*.focus_index + 1;
+        if (in.*.focus_index >= in.*.focus_count_prev) { in.*.focus_index = 0; }
+    }
+}
+
+fn input_focus_end(in: *Input) void { in.*.focus_count_prev = in.*.focus_cursor; }
+
+fn ui_focusable(in: *Input, r: Rect, hovered: bool) bool {
+    let idx: i32 = in.*.focus_cursor;
+    in.*.focus_cursor = in.*.focus_cursor + 1;
+    if (hovered && btn_pressed(in, 0)) { in.*.focus_index = idx; }
+    return in.*.focus_index == idx;
+}
+
+fn ui_key_activate(in: *Input, focused: bool) bool {
+    return focused && (key_hit(in, 13) || key_hit(in, 32));
+}
+
 fn hover(in: *Input, r: Rect) bool {
     if (in.*.capture != 0) { return false; }
     return rect_has(r, in.*.mx, in.*.my);
@@ -268,6 +303,7 @@ fn ui_panel(f: *FB, r: Rect, title: []u8) Rect {
 
 fn ui_button(f: *FB, in: *Input, r: Rect, label: []u8, active: bool) bool {
     let h: bool = hover(in, r);
+    let focused: bool = ui_focusable(in, r, h);
     let hot: i32 = input_hot(in, ui_key(r), h);
     let col: i64 = th_panel_alt();
     if (active) { col = th_accent(); }
@@ -280,20 +316,23 @@ fn ui_button(f: *FB, in: *Input, r: Rect, label: []u8, active: bool) bool {
     fill_round_rect(f, r.x, r.y, r.w, r.h, radius_control(), col);
     let bord: i64 = th_outline();
     if (active) { bord = th_accent_hot(); }
+    if (focused) { bord = th_focus(); }
     round_rect_outline(f, r.x, r.y, r.w, r.h, radius_control(), bord);
     let tw: i32 = text_w(label);
     let tcol: i64 = th_text();
     if (active) { tcol = rgb(245, 247, 252); }
     draw_text(f, r.x + (r.w - tw) / 2, r.y + (r.h - 7) / 2, label, tcol);
-    return h && btn_released(in, 0);
+    return (h && btn_released(in, 0)) || ui_key_activate(in, focused);
 }
 
 // Small icon-ish button (fixed label, e.g. "x" / ">" / "o").
 fn ui_mini(f: *FB, in: *Input, r: Rect, label: []u8, tint: i64) bool {
     let h: bool = hover(in, r);
+    let focused: bool = ui_focusable(in, r, h);
     if (h) { fill_round_rect(f, r.x, r.y, r.w, r.h, radius_control(), th_header()); }
     draw_text(f, r.x + (r.w - text_w(label)) / 2, r.y + (r.h - 7) / 2, label, tint);
-    return h && btn_released(in, 0);
+    if (focused) { round_rect_outline(f, r.x, r.y, r.w, r.h, radius_control(), th_focus()); }
+    return (h && btn_released(in, 0)) || ui_key_activate(in, focused);
 }
 
 // ── text field ────────────────────────────────────────────────────────────────
@@ -326,7 +365,9 @@ fn textedit_text(te: *TextEdit) []u8 {
 
 fn ui_textfield(f: *FB, in: *Input, r: Rect, te: *TextEdit, placeholder: []u8) bool {
     let h: bool = hover(in, r);
+    let focused: bool = ui_focusable(in, r, h);
     if (btn_pressed(in, 0)) { te.*.focus = h; }
+    if (focused && key_hit(in, 13)) { te.*.focus = true; }
     te.*.committed = false;
     let changed: bool = false;
     if (te.*.focus) {
@@ -348,7 +389,7 @@ fn ui_textfield(f: *FB, in: *Input, r: Rect, te: *TextEdit, placeholder: []u8) b
     let bg: i64 = rgb(16, 17, 22);
     fill_round_rect(f, r.x, r.y, r.w, r.h, radius_control(), bg);
     let oc: i64 = th_outline();
-    if (te.*.focus) { oc = th_focus(); }
+    if (te.*.focus || focused) { oc = th_focus(); }
     else if (h) { oc = th_disabled(); }
     round_rect_outline(f, r.x, r.y, r.w, r.h, radius_control(), oc);
     let ty: i32 = r.y + (r.h - 7) / 2;
@@ -375,6 +416,7 @@ fn ui_textfield(f: *FB, in: *Input, r: Rect, te: *TextEdit, placeholder: []u8) b
 fn ui_section(f: *FB, in: *Input, x: i32, y: i32, w: i32, title: []u8, open: *i32, count: i32) bool {
     let r: Rect = rect(x, y, w, row_h());
     let h: bool = hover(in, r);
+    let focused: bool = ui_focusable(in, r, h);
     let hot: i32 = input_hot(in, ui_key(r), h);
     if (hot > 0) { fill_round_rect(f, r.x, r.y, r.w, r.h, radius_control(), mix(th_header(), th_panel(), hot)); }
     let arrow: []u8 = ">";
@@ -385,7 +427,8 @@ fn ui_section(f: *FB, in: *Input, x: i32, y: i32, w: i32, title: []u8, open: *i3
         let cnt: []u8 = _zag_i64_to_str(count as i64);
         draw_text(f, x + w - text_w(cnt) - pad_text() - 2, y + 4, cnt, th_text_dim());
     }
-    if (h && btn_released(in, 0)) {
+    if (focused) { round_rect_outline(f, r.x, r.y, r.w, r.h, radius_control(), th_focus()); }
+    if ((h && btn_released(in, 0)) || ui_key_activate(in, focused)) {
         if (open.* == 1) { open.* = 0; } else { open.* = 1; }
     }
     return open.* == 1;
@@ -427,13 +470,17 @@ fn ui_numfield(f: *FB, in: *Input, r: Rect, value: []u8, unit: []u8, flash_key: 
     draw_text(f, mid.x + (mid.w - text_w(vs)) / 2, r.y + (r.h - 7) / 2, vs, th_text());
     let dm: bool = hover(in, minus);
     let dp: bool = hover(in, plus);
+    let fm: bool = ui_focusable(in, minus, dm);
+    let fp: bool = ui_focusable(in, plus, dp);
     if (dm) { fill_round_rect(f, minus.x, minus.y, minus.w, minus.h, radius_control(), th_header()); }
     if (dp) { fill_round_rect(f, plus.x, plus.y, plus.w, plus.h, radius_control(), th_header()); }
     round_rect_outline(f, r.x, r.y, r.w, r.h, radius_control(), th_outline());
     draw_text(f, minus.x + 4, r.y + (r.h - 7) / 2, "-", th_text());
     draw_text(f, plus.x + 4, r.y + (r.h - 7) / 2, "+", th_text());
-    if (dm && btn_released(in, 0)) { return 0 - 1; }
-    if (dp && btn_released(in, 0)) { return 1; }
+    if (fm) { round_rect_outline(f, minus.x, minus.y, minus.w, minus.h, radius_control(), th_focus()); }
+    if (fp) { round_rect_outline(f, plus.x, plus.y, plus.w, plus.h, radius_control(), th_focus()); }
+    if ((dm && btn_released(in, 0)) || ui_key_activate(in, fm)) { return 0 - 1; }
+    if ((dp && btn_released(in, 0)) || ui_key_activate(in, fp)) { return 1; }
     return 0;
 }
 

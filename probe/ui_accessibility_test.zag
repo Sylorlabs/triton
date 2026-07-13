@@ -1,0 +1,43 @@
+// ui_accessibility_test.zag — keyboard traversal and visible focus contract.
+
+@import("../std/list.zag") as list
+@import("../src/workspace.zag")
+
+fn check(name_: []u8, ok: bool, failures: *i32) void {
+    if (ok) { _zag_print("  ok  "); } else { _zag_print("  XX  "); failures.* = failures.* + 1; }
+    _zag_println(name_);
+}
+
+fn main() i32 {
+    let failures: i32 = 0;
+    let a: *App = app_new(1024, 640);
+    app_frame(a, 0.016);
+    check("production frame registers a broad keyboard traversal surface",
+        a.*.inp.focus_count_prev >= 10, &failures);
+
+    a.*.inp.keys.len = 0; list.push[i32](&a.*.inp.keys, 9); // Tab
+    app_frame(a, 0.016);
+    check("Tab enters the widget focus order", a.*.inp.focus_index == 0 && a.*.inp.focus_nav, &failures);
+    let first: i32 = a.*.inp.focus_index;
+    a.*.inp.keys.len = 0; list.push[i32](&a.*.inp.keys, 9);
+    app_frame(a, 0.016);
+    check("repeated Tab advances focus", a.*.inp.focus_index == first + 1, &failures);
+    a.*.inp.mods = 1; a.*.inp.keys.len = 0; list.push[i32](&a.*.inp.keys, 9);
+    app_frame(a, 0.016); a.*.inp.mods = 0;
+    check("Shift+Tab traverses backward", a.*.inp.focus_index == first, &failures);
+
+    // Widget-level activation and focus border are tested without pointer input.
+    let f: FB = fb_new(120, 50);
+    let inp: Input = input_new();
+    inp.focus_index = 0;
+    list.push[i32](&inp.keys, 13); // Enter
+    input_focus_begin(&inp);
+    let fired: bool = ui_button(&f, &inp, rect(10, 10, 80, 22), "Keyboard", false);
+    input_focus_end(&inp);
+    check("focused button activates with Enter", fired, &failures);
+    check("focused button draws the focus color on its border",
+        f.px.data[10 * f.w + 50] == th_focus(), &failures);
+
+    if (failures == 0) { _zag_println("UI ACCESSIBILITY: ALL PASS"); return 0; }
+    _zag_println("UI ACCESSIBILITY: FAILURES"); return 1;
+}

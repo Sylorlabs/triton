@@ -598,7 +598,10 @@ The user and agent must be able to perform the same core project operations.
       outliner, transport (Run/Step/Reset/rate), the Section 3.10 signal
       timeline as trace viewer, the console log strip, and diagnostics via the
       frame-timing overlay + design-warnings popup; `x11-captures`.
-- [ ] Make every control keyboard-accessible with visible focus.
+- [x] Make every control keyboard-accessible with visible focus. Evidence:
+      `ui-accessibility` adds Tab/Shift+Tab traversal to the shared widget layer,
+      visible `th_focus` rings, and Enter/Space activation; semantic custom
+      actions remain reachable through shortcuts and the focused command palette.
 - [x] Provide selection, multi-selection, box selection, transform, duplicate,
       delete, undo, redo, search, frame-selected, and layer visibility.
       Evidence: `shortcuts`, `boxselect`, `copypaste`, `ui-interactions`
@@ -609,8 +612,11 @@ The user and agent must be able to perform the same core project operations.
       source + date via `draw_provenance`, inline validation errors, and the
       evidence-class labels (Illustrative/User-entered/...) on model values;
       `provenance` and `inspector` gates.
-- [ ] Provide useful empty, loading, error, disconnected, unknown, and read-only
-      states.
+- [x] Provide useful empty, loading, error, disconnected, unknown, and read-only
+      states. Evidence: shared empty-state components; explicit loading,
+      retryable-disconnected and inspect-only banners; invalid FIR/recovery error
+      states; model Unknown/Not-characterized rendering; and a read-only write
+      request path (`ui-states`, `reference-pcu-ui`, `provenance`).
 - [x] Avoid native-looking placeholders where the Triton component system has a
       styled equivalent. Evidence: every control (buttons, fields, tabs,
       menus, tooltips, dialogs) is drawn by `src/ui.zag` over the framebuffer;
@@ -678,10 +684,20 @@ The user and agent must be able to perform the same core project operations.
       present in `run_x11`), a Settings "HiDPI scale" 1x/2x/3x control; the `dpi`
       gate proves pixel-exact upscale and the scale cycle, with a verified 2x
       capture. Live path at 1x is byte-unchanged (`x11-live`/`x11-captures` pass).
-- [ ] Inspect layout for clipping, overlap, unreadable contrast, stale state, and
-      inconsistent hit targets.
-- [ ] Verify error and permission prompts with both keyboard and pointer.
-- [ ] Verify save indicators, crash recovery, undo/redo, and revision conflicts.
+- [x] Inspect layout for clipping, overlap, unreadable contrast, stale state, and
+      inconsistent hit targets. Evidence: fresh production X11 capture at
+      1280x800 on 2026-07-12 (`evidence/captures/ui-design-1280.png`) inspected
+      alongside `layout`, `ui-layers`, `ui-tokens`, and `ui-interactions` gates;
+      panel boundaries, truncation, contrast, cache invalidation and hit targets
+      are clean at this size.
+- [x] Verify error and permission prompts with both keyboard and pointer.
+      Evidence: the write-permission modal supports Enter allow-once, Esc
+      keep-read-only, and pointer buttons; `ui-states` covers all decision paths
+      and fixed modal pointer capture so top-level dialogs are actually clickable.
+- [x] Verify save indicators, crash recovery, undo/redo, and revision conflicts.
+      Evidence: dirty `*` plus save status; `recovery-ui`; journaled undo/redo in
+      `ui-interactions`/`optimizer-ui`; `session-conflict` and
+      `agent-revision-conflict`.
 - [x] Run a long interactive soak with active simulation and editing. Evidence:
       `soak` gate drives 3000 real frames with the simulation playing while
       placing, copy/pasting, deleting, undoing/redoing, and moving the camera,
@@ -690,8 +706,10 @@ The user and agent must be able to perform the same core project operations.
       Evidence: the `soak` gate reports avg/max/over-16ms frame times for the
       demo+edit workload (headless x86-64, compiler hash in the ledger); extend
       with per-hardware GPU/display tuples once certified.
-- [ ] Treat headless rendering as additional coverage, never a substitute for the
-      live UI gate.
+- [x] Treat headless rendering as additional coverage, never a substitute for the
+      live UI gate. Evidence: the headless UI/design suite was paired with a
+      fresh production X11 capture on `DISPLAY=:0` (2026-07-12, 6 ms capture
+      frame), archived as `evidence/captures/ui-design-1280.png`.
 
 ## 10. Phase G — Persistence, Recovery, and Export
 
@@ -712,7 +730,10 @@ The user and agent must be able to perform the same core project operations.
       rejects a truncated and a bit-corrupted project (checksum mismatch) with the
       active scene left intact; atomic temp+rename (`engine` gate) protects the
       target against partial writes, disk-full, and process termination mid-save.
-- [ ] Add autosave retention and explicit recovery UX.
+- [x] Add autosave retention and explicit recovery UX. Evidence: autosave
+      atomically rotates three prior valid snapshots; File > Recover Autosave
+      presents them, and an invalid live file fails closed into that chooser
+      (`recovery-ui`).
 - [x] Make all exports deterministic and identify project/model/tool versions.
       Evidence: canonical byte comparisons in `flash-photonic`.
 - [x] Export human-readable design summaries and machine-readable netlists.
@@ -1691,12 +1712,18 @@ The standard should be: **Triton looks like a designer and CAD engineer built it
 - [x] Construct and verify a large balanced-ternary Flash workload on a Triton
       photonic unit. Evidence: 64 operations, 384 components, 192 guides, zero
       mismatches in the `flash-photonic` gate.
-- [ ] Add visible UI controls for selecting, importing, running, stepping, and
-      inspecting Flash source/FIR and its per-operation trace.
+- [x] Add visible UI controls for selecting, importing, running, stepping, and
+      inspecting Flash source/FIR and its per-operation trace. Evidence: the
+      Flash FIR Workspace provides a keyboard-editable path, bounded Import,
+      Run/Pause/Step/Reset, source view, per-op trace, verification state, and an
+      explicit software-only evidence label; `reference-pcu-ui`.
 - [ ] Give explicitly authorized agents schema-described access to every UI
       control, screenshot, stable element ID, accurate click target, and state.
-- [ ] Complete Flash documentation and release evidence without overstating
-      emulated photonic execution as fabricated-hardware validation.
+- [x] Complete Flash documentation and release evidence without overstating
+      emulated photonic execution as fabricated-hardware validation. Evidence:
+      `docs/FLASH_UI.md` documents the visible workflow, bounded/error behavior,
+      maintained fixtures and gate map, and explicitly separates software
+      simulation from fabricated-hardware validation; the UI repeats that label.
 
 ## 20. Phase M — Continuous Optical-Computation Optimizer (Photon Solver)
 
@@ -1828,13 +1855,17 @@ only thing that changes as work accumulates is the number on that button.
         transactional path. Evidence: the panel's Details preview (before→after
         cost, removals/relabels) plus `opt_apply_gui`→`op_optimize` committing a
         single journaled undo op; `optimizer-ui` gate.
-  - [ ] **Ignore** — dismiss the proposal and never re-propose that rewrite.
+  - [x] **Ignore** — dismiss the proposal and never re-propose that rewrite.
+        Evidence: `optimizer-ui` records the signature in the rejected set and
+        proves a later change-keyed refresh does not surface it again.
   - [x] **Details** — expand the rewrite family, changed cost terms, before/after
         values, and the equivalence evidence. Evidence: `draw_opt_panel` Details
         expansion shows family, removed/relabel counts, before→after cost score,
         and "equivalent over all inputs".
-- [ ] Provide the preview/diff before any Apply, consistent with the Phase E
-      ask-before-write default.
+- [x] Provide the preview/diff before any Apply, consistent with the Phase E
+      ask-before-write default. Evidence: manual Apply is locked until Details
+      shows exact removals/relabels, before/after cost, and equivalence;
+      `optimizer-ui` proves the lock and preview sequence.
 - [x] Support an explicit auto-apply setting (in the Settings surface, §20.5) that
       applies winning proposals automatically. Auto-apply is opt-in, scoped, and
       off by default; when on, applied optimizations still appear in the panel's
@@ -1867,14 +1898,20 @@ only thing that changes as work accumulates is the number on that button.
       `draw_gear` cog icon + menu-bar gear button; `draw_settings_panel` opens a
       real panel with Optimizer/Auto-apply/Min-gain controls; `optimizer-ui` gate
       clicks it open.
-- [ ] Group optimizer controls in Settings: auto-apply on/off, which rewrite
+- [x] Group optimizer controls in Settings: auto-apply on/off, which rewrite
       families may auto-apply, minimum gain threshold, background CPU/time budget,
       and quiet hours — honoring the Section 8 capability and allow/deny rules and
-      hard safety limits.
-- [ ] Make the Optimizer button and the Settings button keyboard-accessible with
-      visible focus and consistent hover/active states (Section 3.1).
-- [ ] Persist all optimizer and settings preferences separately from project
-      semantics (Section 9.1 layout/preferences rule).
+      hard safety limits. Evidence: Settings exposes engine/auto-apply, verified
+      family toggles, 1–100% gain, 1–20% CPU cadence, UTC quiet hours,
+      watchdog/resume, host-policy status, and reset defaults. Auto-apply requires
+      `cap_edit`; `optimizer-ui`, `optimizer-schedule`, and `ui-preferences`.
+- [x] Make the Optimizer button and the Settings button keyboard-accessible with
+      visible focus and consistent hover/active states (Section 3.1). Evidence:
+      Alt+O/Alt+S open them with the menu-bar active treatment; `optimizer-ui`.
+- [x] Persist all optimizer and settings preferences separately from project
+      semantics (Section 9.1 layout/preferences rule). Evidence: layout.cfg
+      round-trips enabled, auto-apply, minimum gain, and both verified family
+      toggles separately from project data (`ui-preferences`).
 
 ### 20.6 Scheduling and "Never Lag" Guarantees
 

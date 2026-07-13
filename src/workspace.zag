@@ -104,15 +104,17 @@ fn app_action(a: *App, code: i32) void {
     // undocumented file path: the canonical Flash PCU is the reproducible
     // reference design users can inspect, run, modify, save, and reopen.
     if (code == 32) { app_open_file(a, "examples/flash_photonic_massive.zpa"); }
+    if (code == 34) { app_show_recovery(a); }
     if (code == 40) { a.*.tool = tool_select(); }
     if (code == 41) { a.*.tool = tool_route(); a.*.route_c = 0 - 1; }
     if (code == 42) { a.*.sim.*.playing = !a.*.sim.*.playing; }
-    if (code == 43) { a.*.opt_open = true; a.*.settings_open = false; }
+    if (code == 43) { a.*.opt_open = true; a.*.settings_open = false; a.*.opt_previewed = false; a.*.opt_details = false; }
     if (code == 44) { a.*.settings_open = true; a.*.opt_open = false; }
     if (code == 45) { a.*.palette_open = true; a.*.palette_text.len = 0; a.*.palette_sel = 0; }
     if (code == 46) { a.*.tool = tool_measure(); a.*.measure_n = 0; }
     if (code == 47) { a.*.inp.reduced_motion = !a.*.inp.reduced_motion; }
     if (code == 48) { a.*.snap_obj = !a.*.snap_obj; }
+    if (code == 49) { a.*.flash_open = true; a.*.settings_open = false; a.*.opt_open = false; }
     if (code >= 50 && code < 50 + kind_count()) { a.*.tool = tool_place_base() + (code - 50); }
     // jump to object (Section 3.6): palette codes 1000+idx select and frame
     if (code >= 1000 && code - 1000 < a.*.scene.*.comps.len) {
@@ -170,8 +172,9 @@ fn palette_commands(out: *list.ArrayList[PCmd]) void {
     list.push[PCmd](out, PCmd{ .label = "Toggle Reduced Motion", .hint = "", .code = 47 });
     list.push[PCmd](out, PCmd{ .label = "Toggle Object Snapping", .hint = "", .code = 48 });
     list.push[PCmd](out, PCmd{ .label = "Toggle Simulation", .hint = "Space", .code = 42 });
-    list.push[PCmd](out, PCmd{ .label = "Open Optimizer", .hint = "", .code = 43 });
-    list.push[PCmd](out, PCmd{ .label = "Open Settings", .hint = "", .code = 44 });
+    list.push[PCmd](out, PCmd{ .label = "Open Optimizer", .hint = "Alt+O", .code = 43 });
+    list.push[PCmd](out, PCmd{ .label = "Open Settings", .hint = "Alt+S", .code = 44 });
+    list.push[PCmd](out, PCmd{ .label = "Flash FIR Workspace", .hint = "", .code = 49 });
     let ki: i32 = 0;
     while (ki < kind_count()) {
         list.push[PCmd](out, PCmd{ .label = _zag_str_concat("Place: ", kind_name(kind_at(ki))),
@@ -351,6 +354,7 @@ fn menu_items(m: i32, out: *list.ArrayList[MenuItem]) void {
         list.push[MenuItem](out, MenuItem{ .label = "", .hint = "", .code = 0 });
         list.push[MenuItem](out, MenuItem{ .label = "Save", .hint = "Ctrl+S", .code = 3 });
         list.push[MenuItem](out, MenuItem{ .label = "Save As...", .hint = "Ctrl+Shift+S", .code = 4 });
+        list.push[MenuItem](out, MenuItem{ .label = "Recover Autosave...", .hint = "", .code = 34 });
         list.push[MenuItem](out, MenuItem{ .label = "", .hint = "", .code = 0 });
         list.push[MenuItem](out, MenuItem{ .label = "Quit", .hint = "Ctrl+Q", .code = 5 });
     }
@@ -436,6 +440,8 @@ fn draw_menubar(a: *App) void {
     if (oh && btn_pressed(inp, 0)) {
         a.*.opt_open = !a.*.opt_open;
         a.*.settings_open = false;
+        a.*.opt_previewed = false;
+        a.*.opt_details = false;
     }
 
     let gr: Rect = zone_settings_gear(a);
@@ -886,6 +892,13 @@ fn draw_toolbar(a: *App) void {
         if (pcmd_match("reference flash pcu", q)) {
             if (ui_button(f, inp, rect(x, y, w, control_h()), "Open Reference Flash PCU", false)) {
                 app_action(a, 32);
+            }
+            y = y + control_h() + pad_text();
+            shown = shown + 1;
+        }
+        if (pcmd_match("flash fir workspace", q)) {
+            if (ui_button(f, inp, rect(x, y, w, control_h()), "Flash FIR Workspace", false)) {
+                app_action(a, 49);
             }
             y = y + control_h() + pad_text();
             shown = shown + 1;
@@ -2425,10 +2438,86 @@ fn modal_frame(a: *App, w: i32, h: i32, title: []u8) Rect {
     return r;
 }
 
+// Flash FIR workspace: a visible, bounded path from source selection through
+// import to run/step and per-operation inspection. It never executes Flash or
+// host code; it only parses FIR through flash_ir.zag.
+fn draw_flash_panel(a: *App) void {
+    if (!a.*.flash_open) { return; }
+    let f: *FB = &a.*.f;
+    let inp: *Input = &a.*.inp;
+    let cap: i32 = inp.*.capture; inp.*.capture = 0;
+    let pr: Rect = modal_frame(a, 660, 420, "Flash FIR Workspace");
+    let field: Rect = rect(pr.x + 12, pr.y + 34, pr.w - 134, 20);
+    let _changed: bool = ui_textfield(f, inp, field, &a.*.flash_path, "path/to/program.fir");
+    if (ui_button(f, inp, rect(pr.x + pr.w - 112, pr.y + 34, 100, 20), "Import FIR", false) ||
+        a.*.flash_path.committed) {
+        let _ok: bool = app_flash_import(a, textedit_text(&a.*.flash_path));
+    }
+
+    let by: i32 = pr.y + 62;
+    let run_label: []u8 = "Run"; if (a.*.sim.*.playing) { run_label = "Pause"; }
+    if (ui_button(f, inp, rect(pr.x + 12, by, 62, 20), run_label, a.*.sim.*.playing)) {
+        a.*.sim.*.playing = !a.*.sim.*.playing;
+    }
+    if (ui_button(f, inp, rect(pr.x + 80, by, 54, 20), "Step", false)) {
+        sim_step(a.*.sim, a.*.scene);
+    }
+    if (ui_button(f, inp, rect(pr.x + 140, by, 58, 20), "Reset", false)) {
+        sim_reset(a.*.sim, a.*.scene);
+    }
+    let stat: []u8 = "not imported"; let scol: i64 = th_text_dim();
+    if (a.*.flash_verify_errors == 0) { stat = "verified: all detector traces match"; scol = th_ok(); }
+    else if (a.*.flash_verify_errors > 0) { stat = "verification mismatch"; scol = th_danger(); }
+    draw_text(f, pr.x + 212, by + 6, stat, scol);
+
+    let sy: i32 = pr.y + 94;
+    draw_text(f, pr.x + 12, sy, "FIR SOURCE", th_text_dim());
+    draw_text(f, pr.x + 340, sy, "PER-OPERATION TRACE", th_text_dim());
+    let sr: Rect = rect(pr.x + 12, sy + 14, 310, 272);
+    let tr: Rect = rect(pr.x + 336, sy + 14, 312, 272);
+    fill_round_rect(f, sr.x, sr.y, sr.w, sr.h, radius_control(), rgb(13, 14, 18));
+    fill_round_rect(f, tr.x, tr.y, tr.w, tr.h, radius_control(), rgb(13, 14, 18));
+    round_rect_outline(f, sr.x, sr.y, sr.w, sr.h, radius_control(), th_outline());
+    round_rect_outline(f, tr.x, tr.y, tr.w, tr.h, radius_control(), th_outline());
+    if (a.*.flash_raw.len == 0) {
+        ui_empty_state(f, sr, "no FIR loaded", "choose a bounded Flash FIR above");
+        ui_empty_state(f, tr, "no operation trace", "import then Run or Step");
+    } else {
+        let pos: i32 = 0; let row: i32 = 0;
+        while (pos < a.*.flash_raw.len && row < 16) {
+            let en: i32 = pos;
+            while (en < a.*.flash_raw.len && (a.*.flash_raw[en] as i32) != 10) { en = en + 1; }
+            draw_text_max(f, sr.x + 7, sr.y + 7 + row * 15, a.*.flash_raw[pos..en], th_text_dim(), sr.w - 14);
+            pos = en + 1; row = row + 1;
+        }
+        let i: i32 = 0;
+        while (i < a.*.flash_tags.len && i < 16) {
+            let yy: i32 = tr.y + 7 + i * 16;
+            draw_text_max(f, tr.x + 7, yy, a.*.flash_tags.data[i], th_text(), 112);
+            let os: []u8 = _zag_str_concat("op ", _zag_i64_to_str(a.*.flash_ops.data[i] as i64));
+            draw_text(f, tr.x + 126, yy, os, th_text_dim());
+            let es: []u8 = _zag_str_concat("expected ", trit_glyph(a.*.flash_expected.data[i]));
+            let ecol: i64 = th_warning();
+            if (a.*.flash_verify_errors == 0) { ecol = th_ok(); }
+            draw_text(f, tr.x + 184, yy, es, ecol);
+            i = i + 1;
+        }
+    }
+    draw_text(f, pr.x + 12, pr.y + pr.h - 24,
+              "FIR import is simulated software evidence; no fabricated-hardware claim.", th_warning());
+    if (ui_button(f, inp, rect(pr.x + pr.w - 88, pr.y + pr.h - 28, 76, 20), "Close", false)) {
+        a.*.flash_open = false;
+    }
+    inp.*.capture = cap;
+}
+
 fn draw_modal(a: *App) void {
     if (a.*.modal == modal_none()) { return; }
     let f: *FB = &a.*.f;
     let inp: *Input = &a.*.inp;
+    // The modal owns the pointer. Underlying panels were already rendered inert
+    // with capture=4; release capture here so modal buttons themselves work.
+    inp.*.capture = 0;
 
     if (a.*.modal == modal_open()) {
         let r: Rect = modal_frame(a, 380, 300, "Open Design");
@@ -2452,6 +2541,43 @@ fn draw_modal(a: *App) void {
         }
         if (ui_button(f, inp, rect(r.x + r.w - 88, r.y + r.h - 26, 80, 18), "Cancel", false)) {
             a.*.modal = modal_none();
+        }
+        return;
+    }
+
+    if (a.*.modal == modal_recovery()) {
+        let r: Rect = modal_frame(a, 460, 250, "Recover Autosave");
+        draw_text(f, r.x + 12, r.y + 34,
+                  "Choose one of the three retained pre-save snapshots.", th_text_dim());
+        let y: i32 = r.y + 56;
+        if (a.*.modal_files.len == 0) {
+            ui_empty_state(f, rect(r.x + 8, y, r.w - 16, 110),
+                           "no recovery snapshots", "autosave history appears after edits");
+        }
+        let i: i32 = 0;
+        while (i < a.*.modal_files.len) {
+            let p: []u8 = a.*.modal_files.data[i];
+            let row: Rect = rect(r.x + 8, y, r.w - 16, 26);
+            let label: []u8 = _zag_str_concat("Restore snapshot ", _zag_i64_to_str((i + 1) as i64));
+            if (ui_button(f, inp, row, label, false)) { let _ok: bool = app_recover_file(a, p); }
+            y = y + 31; i = i + 1;
+        }
+        if (ui_button(f, inp, rect(r.x + r.w - 88, r.y + r.h - 26, 80, 18), "Cancel", false)) {
+            a.*.modal = modal_none();
+        }
+        return;
+    }
+
+    if (a.*.modal == modal_permission()) {
+        let r: Rect = modal_frame(a, 440, 156, "Write Permission");
+        draw_text(f, r.x + 14, r.y + 38, "This workspace is read-only under the current host policy.", th_text());
+        draw_text(f, r.x + 14, r.y + 56, "Allow edits once, or keep inspecting without mutation.", th_text_dim());
+        draw_text(f, r.x + 14, r.y + 78, "Enter allows once; Esc keeps read-only.", th_accent_hot());
+        if (ui_button(f, inp, rect(r.x + 14, r.y + 108, 118, 24), "Allow once", true)) {
+            app_permission_allow_once(a);
+        }
+        if (ui_button(f, inp, rect(r.x + 140, r.y + 108, 138, 24), "Keep read-only", false)) {
+            app_permission_keep_read_only(a);
         }
         return;
     }
@@ -2524,6 +2650,30 @@ fn draw_modal(a: *App) void {
     }
 }
 
+fn draw_access_state(a: *App) void {
+    if (a.*.access_state == access_ready()) { return; }
+    let f: *FB = &a.*.f; let inp: *Input = &a.*.inp;
+    let vp: Rect = zone_center(a);
+    let r: Rect = rect(vp.x + 12, vp.y + 12, imin(430, vp.w - 24), 46);
+    blend_round_rect(f, r.x, r.y, r.w, r.h, radius_panel(), rgb(8, 10, 15), 232);
+    let col: i64 = th_warning(); let title: []u8 = "Loading workspace...";
+    if (a.*.access_state == access_disconnected()) { title = "Disconnected"; col = th_danger(); }
+    if (a.*.access_state == access_read_only()) { title = "Read-only workspace"; col = th_warning(); }
+    round_rect_outline(f, r.x, r.y, r.w, r.h, radius_panel(), col);
+    draw_text(f, r.x + 10, r.y + 9, title, col);
+    draw_text_max(f, r.x + 10, r.y + 25, a.*.access_message, th_text_dim(), r.w - 126);
+    if (a.*.access_state == access_disconnected()) {
+        if (ui_button(f, inp, rect(r.x + r.w - 96, r.y + 12, 84, 22), "Retry", false)) {
+            app_set_access_state(a, access_loading(), "reconnecting to the live session");
+        }
+    }
+    if (a.*.access_state == access_read_only()) {
+        if (ui_button(f, inp, rect(r.x + r.w - 118, r.y + 12, 106, 22), "Request write", false)) {
+            app_request_write_access(a);
+        }
+    }
+}
+
 // ── frame orchestration ───────────────────────────────────────────────────────
 
 // ── Settings panel (Section 20.5) ────────────────────────────────────────────
@@ -2539,7 +2689,7 @@ fn draw_settings_panel(a: *App) void {
     let pw: i32 = 236;
     let px: i32 = gr.x + gr.w - pw;
     if (px < 4) { px = 4; }
-    let pr: Rect = rect(px, menu_h(), pw, 176);
+    let pr: Rect = rect(px, menu_h(), pw, 410);
     draw_shadow(f, pr.x, pr.y, pr.w, pr.h, radius_panel());
     fill_round_rect(f, pr.x, pr.y, pr.w, pr.h, radius_panel(), th_panel());
     round_rect_outline(f, pr.x, pr.y, pr.w, pr.h, radius_panel(), th_outline());
@@ -2553,6 +2703,34 @@ fn draw_settings_panel(a: *App) void {
         a.*.opt.*.enabled = !a.*.opt.*.enabled;
     }
     y = y + 24;
+    draw_text(f, pr.x + 10, y + 5, "CPU budget", th_text_dim());
+    if (ui_mini(f, inp, rect(pr.x + pw - 88, y + 2, 16, 16), "-", th_text())) { a.*.opt.*.cpu_budget_pct = imax(1, a.*.opt.*.cpu_budget_pct - 1); }
+    if (ui_mini(f, inp, rect(pr.x + pw - 18, y + 2, 16, 16), "+", th_text())) { a.*.opt.*.cpu_budget_pct = imin(20, a.*.opt.*.cpu_budget_pct + 1); }
+    let cbx: i32 = pr.x + pw - 62; cbx = cbx + draw_int(f, cbx, y + 5, a.*.opt.*.cpu_budget_pct as i64, th_text_dim());
+    draw_text(f, cbx, y + 5, "%", th_text_dim());
+    y = y + 24;
+    draw_text(f, pr.x + 10, y + 5, "Quiet hours UTC", th_text_dim());
+    let qtext: []u8 = _zag_str_concat(_zag_str_concat(_zag_i64_to_str(a.*.opt.*.quiet_start_hour as i64), "-"), _zag_i64_to_str(a.*.opt.*.quiet_end_hour as i64));
+    if (ui_button(f, inp, rect(pr.x + pw - 74, y, 64, 18), qtext, opt_quiet_now(a.*.opt))) {
+        a.*.opt.*.quiet_start_hour = (a.*.opt.*.quiet_start_hour + 1) % 24;
+        a.*.opt.*.quiet_end_hour = (a.*.opt.*.quiet_end_hour + 1) % 24;
+    }
+    y = y + 24;
+    draw_text(f, pr.x + 10, y + 5, "Watchdog", th_text_dim());
+    let wd: []u8 = "Armed"; if (a.*.opt.*.suspended) { wd = "Resume"; }
+    if (ui_button(f, inp, rect(pr.x + pw - 74, y, 64, 18), wd, !a.*.opt.*.suspended)) { opt_engine_resume(a.*.opt); }
+    y = y + 24;
+    let policy: []u8 = "Host policy: inspect only"; let pcol: i64 = th_warning();
+    if (cap_allowed(cap_edit())) { policy = "Host policy: edits allowed"; pcol = th_ok(); }
+    draw_text(f, pr.x + 10, y + 5, policy, pcol);
+    y = y + 24;
+    if (ui_button(f, inp, rect(pr.x + 10, y, pw - 20, 18), "Reset optimizer defaults", false)) {
+        a.*.opt.*.enabled = true; a.*.opt.*.auto_apply = false; a.*.opt.*.min_gain_pct = 1;
+        a.*.opt.*.family_dead_path = true; a.*.opt.*.family_const_collapse = true;
+        a.*.opt.*.cpu_budget_pct = 5; a.*.opt.*.quiet_start_hour = 22; a.*.opt.*.quiet_end_hour = 7;
+        opt_engine_resume(a.*.opt);
+    }
+    y = y + 24;
     draw_text(f, pr.x + 10, y + 5, "Auto-apply", th_text_dim());
     let a_lbl: []u8 = "Off";
     if (a.*.opt.*.auto_apply) { a_lbl = "On"; }
@@ -2561,9 +2739,27 @@ fn draw_settings_panel(a: *App) void {
     }
     y = y + 24;
     draw_text(f, pr.x + 10, y + 5, "Min gain", th_text_dim());
+    if (ui_mini(f, inp, rect(pr.x + pw - 88, y + 2, 16, 16), "-", th_text())) {
+        a.*.opt.*.min_gain_pct = imax(1, a.*.opt.*.min_gain_pct - 1);
+    }
+    if (ui_mini(f, inp, rect(pr.x + pw - 18, y + 2, 16, 16), "+", th_text())) {
+        a.*.opt.*.min_gain_pct = imin(100, a.*.opt.*.min_gain_pct + 1);
+    }
     let gx: i32 = pr.x + pw - 62;
     gx = gx + draw_int(f, gx, y + 5, a.*.opt.*.min_gain_pct as i64, th_text_dim());
     draw_text(f, gx, y + 5, "%", th_text_dim());
+    y = y + 24;
+    draw_text(f, pr.x + 10, y + 5, "Dead-path family", th_text_dim());
+    let fd_lbl: []u8 = "Off"; if (a.*.opt.*.family_dead_path) { fd_lbl = "On"; }
+    if (ui_button(f, inp, rect(pr.x + pw - 62, y, 52, 18), fd_lbl, a.*.opt.*.family_dead_path)) {
+        a.*.opt.*.family_dead_path = !a.*.opt.*.family_dead_path;
+    }
+    y = y + 24;
+    draw_text(f, pr.x + 10, y + 5, "Const-fold family", th_text_dim());
+    let fc_lbl: []u8 = "Off"; if (a.*.opt.*.family_const_collapse) { fc_lbl = "On"; }
+    if (ui_button(f, inp, rect(pr.x + pw - 62, y, 52, 18), fc_lbl, a.*.opt.*.family_const_collapse)) {
+        a.*.opt.*.family_const_collapse = !a.*.opt.*.family_const_collapse;
+    }
     y = y + 24;
     draw_text(f, pr.x + 10, y + 5, "HiDPI scale", th_text_dim());
     let s_lbl: []u8 = "1x";
@@ -2669,10 +2865,15 @@ fn draw_opt_panel(a: *App) void {
         draw_text(f, gx, gy, " parts", th_text_dim());
 
         let by: i32 = pr.y + 62;
-        if (ui_button(f, inp, rect(pr.x + 10, by, 82, 20), "Apply", true)) {
-            opt_apply_gui(a);
-            a.*.opt_open = false;
-            a.*.opt_details = false;
+        if (ui_button(f, inp, rect(pr.x + 10, by, 82, 20), "Apply", a.*.opt_previewed)) {
+            if (a.*.opt_previewed) {
+                opt_apply_gui(a);
+                a.*.opt_open = false;
+                a.*.opt_details = false;
+                a.*.opt_previewed = false;
+            } else {
+                app_invalid(a, "review Details before Apply");
+            }
         }
         if (ui_button(f, inp, rect(pr.x + 98, by, 82, 20), "Ignore", false)) {
             opt_engine_ignore_pending(a.*.opt);
@@ -2681,6 +2882,7 @@ fn draw_opt_panel(a: *App) void {
         }
         if (ui_button(f, inp, rect(pr.x + 186, by, 82, 20), "Details", a.*.opt_details)) {
             a.*.opt_details = !a.*.opt_details;
+            if (a.*.opt_details) { a.*.opt_previewed = true; }
         }
         if (a.*.opt_details) {
             let dy: i32 = pr.y + 90;
@@ -2865,7 +3067,7 @@ fn app_compute_present(a: *App) void {
     a.*.present_full = false;
 
     // Overlays cover/dim large areas: upload the whole frame.
-    if (a.*.menu >= 0 || a.*.modal != modal_none() || a.*.palette_open ||
+    if (a.*.menu >= 0 || a.*.modal != modal_none() || a.*.palette_open || a.*.flash_open ||
         a.*.opt_open || a.*.settings_open || a.*.ctx_open || a.*.warn_open ||
         a.*.title_dirty || a.*.frame < 3) {
         a.*.present_full = true;
@@ -2922,13 +3124,14 @@ fn app_frame(a: *App, dt: f64) void {
     a.*.inp.text_focus = false;
     a.*.inp.tip_text = "";
     a.*.inp.capture = 0;
+    input_focus_begin(&a.*.inp);
     // an open modal, menu, command palette, context menu, or optimizer/settings
     // panel owns the pointer: panels underneath go inert
-    if (a.*.modal != modal_none() || a.*.menu >= 0 || a.*.palette_open ||
+    if (a.*.modal != modal_none() || a.*.menu >= 0 || a.*.palette_open || a.*.flash_open ||
         a.*.opt_open || a.*.settings_open || a.*.ctx_open) { a.*.inp.capture = 4; }
     if (a.*.inp.capture == 0) { app_splitters(a); }
     // a focused text field owns the keyboard (fields consume keys as they draw)
-    let typing: bool = a.*.lib_search.focus || a.*.out_search.focus ||
+    let typing: bool = a.*.lib_search.focus || a.*.out_search.focus || a.*.flash_path.focus ||
         a.*.rename_edit.focus || a.*.insp_edit.focus;
     if (a.*.palette_open) { app_palette_keys(a); }
     else if (!typing) { app_keys(a); }
@@ -2946,12 +3149,12 @@ fn app_frame(a: *App, dt: f64) void {
     // move, split, menu, modal, or active simulation). With auto-apply off — the
     // default — a tick only updates the Optimizer badge and never mutates the
     // project, so it is a pure runtime observer.
-    if (a.*.frame % 60 == 0 &&
+    if (a.*.frame % opt_cadence_frames(a.*.opt) == 0 && !opt_quiet_now(a.*.opt) &&
         opt_should_run(a.*.opt.*.enabled, a.*.opt.*.suspended, a.*.moving, a.*.cam_drag,
                        a.*.grab != 0, a.*.menu >= 0, a.*.modal != modal_none(),
-                       a.*.sim.*.playing, a.*.opt_open || a.*.settings_open || a.*.palette_open)) {
+                       a.*.sim.*.playing, a.*.opt_open || a.*.settings_open || a.*.palette_open || a.*.flash_open)) {
         let _oc: bool = opt_engine_refresh_keyed(a.*.opt, a.*.scene);
-        if (a.*.opt.*.auto_apply && a.*.opt.*.has_pending) {
+        if (a.*.opt.*.auto_apply && cap_allowed(cap_edit()) && a.*.opt.*.has_pending) {
             opt_apply_gui(a);   // journaled + audited, single-undo
         }
     }
@@ -2963,7 +3166,7 @@ fn app_frame(a: *App, dt: f64) void {
     // A panel re-runs its widget code only when its state hash changed, the
     // pointer is over it (or just left), an ease is mid-flight, or a pointer
     // grab is active; otherwise its cached pixels blit back in one command.
-    let force: bool = a.*.anim_live_prev || a.*.inp.capture == 3 || a.*.inp.capture == 1;
+    let force: bool = a.*.anim_live_prev || a.*.inp.capture == 3 || a.*.inp.capture == 1 || a.*.inp.focus_nav;
     // During an active camera drag the panels neither change nor get re-uploaded
     // (dirty-region present sends only the viewport, which never overwrites the
     // panel regions), so their framebuffer pixels persist and the cached blit is
@@ -3000,11 +3203,14 @@ fn app_frame(a: *App, dt: f64) void {
     draw_menu_dropdown(a);
     draw_settings_panel(a);
     draw_opt_panel(a);
+    draw_flash_panel(a);
     draw_modal(a);
     draw_palette(a);
     draw_ctx_menu(a);
     draw_warnings_popup(a);
+    draw_access_state(a);
     ui_tip_flush(&a.*.f, &a.*.inp);
+    input_focus_end(&a.*.inp);
 
     app_compute_present(a);
 

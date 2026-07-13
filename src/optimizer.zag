@@ -450,6 +450,11 @@ struct OptEngine {
     enabled: bool,
     auto_apply: bool,
     min_gain_pct: i32,
+    family_dead_path: bool,
+    family_const_collapse: bool,
+    cpu_budget_pct: i32,
+    quiet_start_hour: i32,
+    quiet_end_hour: i32,
     has_pending: bool,
     pending: OptProposal,
     badge: i32,          // number of pending proposals shown on the button
@@ -465,6 +470,11 @@ fn opt_engine_new() *OptEngine {
         .enabled = true,
         .auto_apply = false,
         .min_gain_pct = 1,
+        .family_dead_path = true,
+        .family_const_collapse = true,
+        .cpu_budget_pct = 5,
+        .quiet_start_hour = 22,
+        .quiet_end_hour = 7,
         .has_pending = false,
         .pending = opt_proposal_none(),
         .badge = 0,
@@ -502,6 +512,32 @@ fn opt_engine_rejected(e: *OptEngine, sig: i64) bool {
     return false;
 }
 
+fn opt_engine_family_enabled(e: *OptEngine, family: i32) bool {
+    if (family == opt_family_dead_path()) { return e.*.family_dead_path; }
+    if (family == opt_family_const_collapse()) { return e.*.family_const_collapse; }
+    return false;
+}
+
+fn opt_epoch_seconds() i64 {
+    let ts: list.ArrayList[i64] = list.make[i64](2);
+    list.push[i64](&ts, 0); list.push[i64](&ts, 0);
+    let rc: i64 = _zag_raw_syscall(228, 0, ts.data as i64, 0, 0, 0, 0);
+    let sec: i64 = 0; if (rc == 0) { sec = ts.data[0]; }
+    list.free[i64](&ts); return sec;
+}
+
+fn opt_quiet_now(e: *OptEngine) bool {
+    let hour: i32 = ((opt_epoch_seconds() / 3600) % 24) as i32;
+    let st: i32 = e.*.quiet_start_hour; let en: i32 = e.*.quiet_end_hour;
+    if (st == en) { return false; }
+    if (st < en) { return hour >= st && hour < en; }
+    return hour >= st || hour < en;
+}
+
+fn opt_cadence_frames(e: *OptEngine) i64 {
+    return imax(30, 300 / clampi(e.*.cpu_budget_pct, 1, 20)) as i64;
+}
+
 fn opt_engine_suspended(e: *OptEngine) bool { return e.*.suspended; }
 fn opt_engine_suspend_code(e: *OptEngine) i32 { return e.*.suspend_code; }
 
@@ -532,6 +568,11 @@ fn opt_engine_refresh_keyed(e: *OptEngine, s: *Scene) bool {
     if (s.*.render_rev == e.*.last_rev) { return false; }   // change key: no work
     e.*.last_rev = s.*.render_rev;
     let p: OptProposal = opt_analyze(s);
+    if (p.valid && !opt_engine_family_enabled(e, p.family)) {
+        opt_proposal_free(&p);
+        if (e.*.has_pending) { opt_engine_clear_pending(e); return true; }
+        return false;
+    }
     if (!p.valid || opt_gain_percent(p) < e.*.min_gain_pct) {
         opt_proposal_free(&p);
         if (e.*.has_pending) { opt_engine_clear_pending(e); return true; }
@@ -571,6 +612,11 @@ fn opt_engine_badge(e: *OptEngine) i32 { return e.*.badge; }
 fn opt_engine_tick(e: *OptEngine, s: *Scene) bool {
     if (!e.*.enabled) { return false; }
     let p: OptProposal = opt_analyze(s);
+    if (p.valid && !opt_engine_family_enabled(e, p.family)) {
+        opt_proposal_free(&p);
+        if (e.*.has_pending) { opt_engine_clear_pending(e); return true; }
+        return false;
+    }
     if (!p.valid || opt_gain_percent(p) < e.*.min_gain_pct) {
         opt_proposal_free(&p);
         if (e.*.has_pending) { opt_engine_clear_pending(e); return true; }
@@ -597,6 +643,11 @@ fn opt_engine_tick(e: *OptEngine, s: *Scene) bool {
 fn opt_engine_refresh(e: *OptEngine, s: *Scene) bool {
     if (!e.*.enabled) { return false; }
     let p: OptProposal = opt_analyze(s);
+    if (p.valid && !opt_engine_family_enabled(e, p.family)) {
+        opt_proposal_free(&p);
+        if (e.*.has_pending) { opt_engine_clear_pending(e); return true; }
+        return false;
+    }
     if (!p.valid || opt_gain_percent(p) < e.*.min_gain_pct) {
         opt_proposal_free(&p);
         if (e.*.has_pending) { opt_engine_clear_pending(e); return true; }

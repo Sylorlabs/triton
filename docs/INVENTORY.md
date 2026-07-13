@@ -47,7 +47,7 @@ storage formats, and external dependencies (Master plan §4.1). The
 
 ## Probes
 
-See `probe/MANIFEST.md` — 105 probe sources classified as production (gated),
+See `probe/MANIFEST.md` — 108 probe sources classified as production (gated),
 hardware-only, dev-benchmark, compiler, or obsolete.
 
 ## Generated artifacts (never committed; see `.gitignore`)
